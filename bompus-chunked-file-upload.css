@@ -1,0 +1,74 @@
+div[data-bfu-text] {
+  padding: 0 0 2px 0;
+}
+
+div[data-bfu-text] span.bfu-error {
+  color: #c00;
+  font-weight: bold;
+}
+
+div[data-bfu-text] a {
+  text-decoration: underline;
+  color: #00f;
+}
+
+div[data-bfu-text] a.bfu-dl {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #00f;
+}
+
+div[data-bfu-text] a.bfu-remove {
+  color: #c00;
+}
+
+div[data-bfu-text] a,
+div[data-bfu-text] span {
+  display: block;
+  float: left;
+}
+
+/* clearfix, works on IE8+ */
+div[data-bfu-text]:after {
+  content: "";
+  display: table;
+  clear: both;
+}
+
+div[data-bfu-file] {
+  display: none;
+}
+
+.bfu-bar {
+  position: relative;
+  height: 25px;
+  width: 100%;
+  max-width: 400px;
+  background: #1a1a1a;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 1px 2px rgba(0, 0, 0, 0.24);
+}
+
+.bfu-bar-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 25px;
+  width: 0%;
+  background: #0091ea;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.5) inset;
+  transition: width 500ms ease-in-out;
+}
+
+.bfu-bar-text {
+  position: absolute;
+  top: 5px;
+  left: 0;
+  width: 100%;
+  color: #fff;
+  font-weight: normal;
+  font-size: 14px;
+  text-align: center;
+  text-shadow: 1px 1px 1px #000;
+}

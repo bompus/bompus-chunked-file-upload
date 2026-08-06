@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Bompus Chunked File Upload — working example</title>
+
+  <link rel="stylesheet" href="./bompus-chunked-file-upload.css" />
+  <script src="./bompus-chunked-file-upload.js"></script>
+
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 560px;
+      margin: 24px auto;
+      padding: 0 16px;
+      line-height: 1.4;
+    }
+    .card {
+      border: 1px solid #ddd;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    input[type="file"] {
+      display: block;
+      width: 100%;
+      margin-top: 8px;
+    }
+    #submitdiv {
+      margin-top: 16px;
+      padding: 12px;
+      background: #f3f3f3;
+      text-align: center;
+    }
+    .hint {
+      color: #555;
+      font-size: 0.9rem;
+    }
+    code { font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <h1>Bompus Chunked File Upload v2.0.0</h1>
+  <p class="hint">
+    Serve this folder over HTTP (not <code>file://</code>) so
+    <code>upload.php</code> can receive chunks. Example:
+    <code>php -S localhost:8080</code> then open
+    <code>http://localhost:8080/example.html</code>.
+  </p>
+
+  <form id="demo-form" action="#" method="get">
+    <div class="card">
+      <strong>Upload a file</strong>
+      <div data-bfu-text="upload-1"></div>
+      <input data-bfu-file="upload-1" type="file" />
+      <input data-bfu-hidden="upload-1" type="hidden" name="upload-1" value="" />
+    </div>
+
+    <div id="submitdiv">
+      <div id="publish-status"></div>
+      <button type="submit" id="publish">Submit</button>
+    </div>
+  </form>
+
+  <script>
+    (function () {
+      document.getElementById("demo-form").addEventListener("submit", function (e) {
+        e.preventDefault();
+        var hidden = document.querySelector('[data-bfu-hidden="upload-1"]');
+        window.alert("Form would submit here. Hidden field value: " + (hidden ? hidden.value : ""));
+      });
+
+      BompusFileUpload({
+        postUrl: "./upload.php",
+        fieldName: "upload-1",
+        chunkSizeMB: 0.98,
+        parallelLimit: 5,
+        maxFullSizeMB: 20,
+        maxRetries: 3,
+        hooks: {
+          getFileDownloadUrl: function (uriEncodedFilename) {
+            return "./files/" + uriEncodedFilename;
+          },
+
+          getFileDownloadLinkClassName: function (uriEncodedFilename) {
+            var ext = (uriEncodedFilename.split(".").pop() || "").toLowerCase();
+            if (ext === "jpg" || ext === "jpeg" || ext === "png" || ext === "gif" || ext === "webp") {
+              return "imgLink";
+            }
+            return "downloadLink";
+          },
+
+          fileSelected: function () {
+            var name = this.file && this.file.name ? this.file.name : "";
+            if (/\.exe$/i.test(name)) {
+              return Promise.reject("Executable files are not allowed.");
+            }
+          },
+
+          beforeChunkSend: function (formData) {
+            formData.append("meta", "upload-1");
+          },
+
+          progressStart: function () {
+            var status = document.getElementById("publish-status");
+            if (status && status.querySelector(".inProgressPub") === null) {
+              status.innerHTML = "<div class='inProgressPub'>Upload in progress — please wait.</div>";
+            }
+          },
+
+          progressEnd: function () {
+            var status = document.getElementById("publish-status");
+            if (status) {
+              var el = status.querySelector(".inProgressPub");
+              if (el) {
+                el.remove();
+              }
+            }
+          },
+
+          uploadComplete: function () {
+            console.log("upload duration", this.uploadDuration, "seconds");
+          }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
