@@ -37,10 +37,6 @@ div[data-bfu-text]:after {
   clear: both;
 }
 
-div[data-bfu-file] {
-  display: none;
-}
-
 .bfu-bar {
   position: relative;
   height: 25px;

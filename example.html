@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bompus Chunked File Upload 2.1 — example</title>
+  <title>Bompus Chunked File Upload 3.0 — example</title>
   <link rel="stylesheet" href="./bompus-chunked-file-upload.css" />
   <script src="./bompus-chunked-file-upload.js"></script>
   <style>
@@ -16,7 +16,7 @@
   </style>
 </head>
 <body>
-  <h1>Bompus Chunked File Upload v2.1.0</h1>
+  <h1>Bompus Chunked File Upload v3.0.0</h1>
   <p class="hint">Serve with <code>php -S localhost:8080</code> then open this page over HTTP.</p>
 
   <form id="demo-form" action="#" method="get">
@@ -34,8 +34,12 @@
 
   <script>
     (function () {
-      document.getElementById("demo-form").addEventListener("submit", function (e) {
+      var form = document.getElementById("demo-form");
+      form.addEventListener("submit", function (e) {
         e.preventDefault();
+        if (BompusFileUpload.formBusyCount(form) > 0) {
+          return;
+        }
         var hidden = document.querySelector('[data-bfu-hidden="upload-1"]');
         window.alert("Hidden field value: " + (hidden ? hidden.value : ""));
       });
@@ -55,18 +59,27 @@
 
       BompusFileUpload.mountDefaultUi(up, { linkNewUploads: true });
 
-      up.on("busy", function () {
-        var status = document.getElementById("publish-status");
-        if (status && !status.querySelector(".inProgressPub")) {
-          status.innerHTML = "<div class='inProgressPub'>Upload in progress — please wait.</div>";
+      BompusFileUpload.trackFormBusy(form, {
+        onChange: function (count) {
+          var status = document.getElementById("publish-status");
+          if (!status) {
+            return;
+          }
+          if (count > 0) {
+            if (!status.querySelector(".inProgressPub")) {
+              status.innerHTML = "<div class='inProgressPub'>Upload in progress — please wait.</div>";
+            }
+          } else {
+            var el = status.querySelector(".inProgressPub");
+            if (el) {
+              el.remove();
+            }
+          }
         }
       });
-      up.on("idle", function () {
-        var el = document.querySelector("#publish-status .inProgressPub");
-        if (el) { el.remove(); }
-      });
+
       up.on("complete", function (p) {
-        console.log("done", p.fileName, p.duration + "s");
+        console.log("done", p.fileName, p.duration + "s", "bfu", document.querySelector("[data-bfu-hidden]").bfu === up);
       });
     })();
   </script>

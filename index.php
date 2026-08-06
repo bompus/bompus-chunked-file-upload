@@ -1,9 +1,9 @@
 <?php
 /*!
- * Bompus Chunked File Upload v2.1.0
+ * Bompus Chunked File Upload v3.0.0
  * https://github.com/bompus/bompus-chunked-file-upload
  *
- * Library: vanilla JS (no jQuery). This demo page loads jQuery only for croppie/featherlight.
+ * Library: zero dependencies. This page’s crop demo loads extra scripts separately.
  *
  * Copyright Aaron Queen
  */
@@ -15,13 +15,13 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-		<title>Bompus Chunked File Upload 2.1 - Example</title>
+		<title>Bompus Chunked File Upload 3.0 - Example</title>
 		<meta name="viewport" content="width=device-width,initial-scale=1.0" />
 
 		<link rel="stylesheet" href="./bompus-chunked-file-upload.css?v=<?php echo time(); ?>" />
 		<script src="./bompus-chunked-file-upload.js?v=<?php echo time(); ?>"></script>
 
-		<!-- jQuery only for croppie/featherlight demo (not required by BompusFileUpload) -->
+		<!-- Demo-only scripts (not part of the library) -->
 		<script src='https://cdn.jsdelivr.net/npm/jquery@1.12.4/dist/jquery.min.js'></script>
 		
 		<!-- BEGIN: EXAMPLE PAGE STYLES, NOT NEEDED FOR PLUGIN USAGE -->
@@ -109,22 +109,23 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 				return '/files/' + this.o.fieldName + '/' + uriEncodedFilename;
 			};
 			
-			var bindBusyUi = function(up) {
-				up.on("busy", function() {
-					if ($("#submitdiv #major-publishing-actions .inProgressPub").length === 0) {
-						$("#submitdiv #major-publishing-actions").prepend(
-							"<div class='inProgressPub'>A file upload is in progress. Please wait for it to complete before clicking SAVE.</div><br />"
-						);
+			$(function() {
+				var form = document.querySelector("form");
+				BompusFileUpload.trackFormBusy(form, {
+					onChange: function(count) {
+						var major = $("#submitdiv #major-publishing-actions");
+						if (count > 0) {
+							if (major.find(".inProgressPub").length === 0) {
+								major.prepend(
+									"<div class='inProgressPub'>A file upload is in progress. Please wait for it to complete before clicking SAVE.</div><br />"
+								);
+							}
+						} else {
+							major.find(".inProgressPub").remove();
+						}
 					}
 				});
-				up.on("idle", function() {
-					$("#submitdiv #major-publishing-actions .inProgressPub").remove();
-				});
-				up.on("complete", function(p) {
-					console.log("upload duration", p.duration, "seconds");
-					$.featherlight.close();
-				});
-			};
+			});
 		</script>
 		<!-- END: EXAMPLE PAGE STYLES, NOT NEEDED FOR PLUGIN USAGE -->
 
@@ -138,7 +139,7 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 	</head>
 	<body>
 		<div class='container'>
-			<h3 style='margin:0;margin-bottom:15px;'>Bompus Chunked File Upload - v2.1.0 - <a target='_blank' href='https://github.com/bompus/bompus-chunked-file-upload'>GitHub</a></h3>
+			<h3 style='margin:0;margin-bottom:15px;'>Bompus Chunked File Upload - v3.0.0 - <a target='_blank' href='https://github.com/bompus/bompus-chunked-file-upload'>GitHub</a></h3>
 			<form action='#' method='get' onsubmit='alert("Form Submitted. Not really though, this does not actually submit anywhere."); return false;'>
 				
 			<div class='example'>
@@ -166,7 +167,9 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 								downloadUrl: myGetFileDownloadUrl
 							});
 							BompusFileUpload.mountDefaultUi(upload_1, { linkNewUploads: true });
-							bindBusyUi(upload_1);
+							upload_1.on("complete", function(p) {
+								console.log("upload duration", p.duration, "seconds");
+							});
 						})();
 					</script>
 				</div>
@@ -296,15 +299,16 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 									});
 								}
 							});
-							upload_2.on("complete", function() {
+							upload_2.on("complete", function(p) {
 								$('#' + fieldName + '-img').attr('src', upload_2.currentUrl);
+								console.log("upload duration", p.duration, "seconds");
+								$.featherlight.close();
 							});
-							var ui2 = BompusFileUpload.mountDefaultUi(upload_2, {
+							BompusFileUpload.mountDefaultUi(upload_2, {
 								infoText: document.querySelector('div[data-bfu-text="<?php echo $name; ?>"]'),
 								linkNewUploads: true,
 								showRemove: false
 							});
-							bindBusyUi(upload_2);
 						})(jQuery);
 					</script>
 				</div>

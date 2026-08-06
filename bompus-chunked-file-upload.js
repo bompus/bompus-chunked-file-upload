@@ -1,10 +1,13 @@
 /*!
- * Bompus Chunked File Upload v2.1.0
+ * Bompus Chunked File Upload v3.0.0
  * https://github.com/bompus/bompus-chunked-file-upload
  *
- * Headless chunked upload engine + optional mountDefaultUi.
- * Requires: Promise/async-await, Blob/File.slice, FormData, XMLHttpRequest upload.
- * No jQuery.
+ * Headless chunked upload engine + optional mountDefaultUi (same file for CDN).
+ * Single-file >1k is intentional (no separate UI package); engine vs UI sectioned below.
+ * Zero dependencies. Requires modern browser APIs:
+ * Promise/async-await, Blob/File.slice, FormData, XMLHttpRequest upload.
+ *
+ * chunkSizeMB / maxFullSizeMB use decimal megabytes (1 MB = 1_000_000 bytes).
  *
  * Copyright Aaron Queen
  */
@@ -12,48 +15,52 @@
 (function (global) {
   "use strict";
 
-  var SKIP_UPLOAD = Object.freeze({ skipUpload: true });
-  var ABORTED = Object.freeze({ __bfuAborted: true });
+  var SKIP_UPLOAD = { name: "SKIP_UPLOAD" };
+  var ABORTED = { name: "ABORTED" };
+  var TIMEOUT = { name: "TIMEOUT" };
+  var TRANSPORT_ERROR = { name: "TRANSPORT_ERROR" };
 
+  var DEFAULT_IMAGE_EXTS = ["jpg", "jpeg", "png", "gif", "webp", "avif"];
 
+  var formBusyState = new WeakMap();
+
+  /** Leading call, then trailing pulses every `wait` ms while activity continues. */
   function createThrottledUpdate(fn, wait) {
-    var interval = null;
-    var lastCall = null;
+    var timer = null;
+    var pending = null;
 
     function cancel() {
-      clearInterval(interval);
-      interval = null;
-      lastCall = null;
+      clearTimeout(timer);
+      timer = null;
+      pending = null;
     }
 
-    function caller() {
-      if (interval) {
-        return;
-      }
-      lastCall();
-      lastCall = null;
-      interval = setInterval(function () {
-        if (lastCall) {
-          lastCall();
-          lastCall = null;
-        } else {
-          cancel();
+    function schedule() {
+      timer = setTimeout(function () {
+        timer = null;
+        if (pending) {
+          var args = pending;
+          pending = null;
+          fn.apply(null, args);
+          schedule();
         }
       }, wait);
     }
 
     var rtn = function () {
-      var args = arguments;
-      lastCall = function () {
-        fn.apply(null, args);
-      };
-      caller();
+      pending = arguments;
+      if (timer) {
+        return;
+      }
+      fn.apply(null, pending);
+      pending = null;
+      schedule();
     };
     rtn.cancel = cancel;
     return rtn;
   }
 
-  async function mapLimit(count, limit, worker, onFirstError) {
+  async function mapLimit(count, limit, worker) {
     var next = 0;
     var firstError = null;
     var concurrency = Math.max(1, limit);
@@ -66,9 +73,6 @@
         } catch (err) {
           if (firstError === null) {
             firstError = err;
-            if (typeof onFirstError === "function") {
-              onFirstError();
-            }
           }
           throw err;
         }
@@ -93,13 +97,58 @@
   }
 
   function errMessage(err) {
+    if (err === TIMEOUT) {
+      return "Upload timed out.";
+    }
+    if (err === ABORTED) {
+      return "Upload aborted.";
+    }
+    if (err === TRANSPORT_ERROR) {
+      return "Upload failed.";
+    }
+    if (err === SKIP_UPLOAD) {
+      return "Upload skipped.";
+    }
     if (typeof err === "string") {
       return err;
     }
     if (err && err.message) {
       return err.message;
     }
+    if (err && err.name) {
+      return String(err.name);
+    }
     return String(err);
+  }
+
+  function cssAttrEscape(value) {
+    var s = String(value);
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return CSS.escape(s);
+    }
+    return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+  }
+
+  function getFormBusyEntry(form) {
+    var entry = formBusyState.get(form);
+    if (!entry) {
+      entry = { count: 0, listeners: [] };
+      formBusyState.set(form, entry);
+    }
+    return entry;
+  }
+
+  function adjustFormBusy(form, delta) {
+    if (!form) {
+      return;
+    }
+    var entry = getFormBusyEntry(form);
+    entry.count = Math.max(0, entry.count + delta);
+    var count = entry.count;
+    var listeners = entry.listeners.slice();
+    for (var i = 0; i < listeners.length; i++) {
+      listeners[i](count);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -113,12 +162,13 @@
 
     options = options || {};
     var fieldName = options.fieldName !== undefined ? options.fieldName : "bompus-file-1";
+    var fieldSel = cssAttrEscape(fieldName);
     var hiddenInput =
       (options.elements && options.elements.hiddenInput) ||
-      document.querySelector('input[type=hidden][data-bfu-hidden="' + fieldName + '"]');
+      document.querySelector('input[type=hidden][data-bfu-hidden="' + fieldSel + '"]');
     var fileInput =
       (options.elements && options.elements.fileInput) ||
-      document.querySelector('input[type=file][data-bfu-file="' + fieldName + '"]');
+      document.querySelector('input[type=file][data-bfu-file="' + fieldSel + '"]');
     var form =
       (options.elements && options.elements.form) ||
       (hiddenInput ? hiddenInput.closest("form") : null);
@@ -135,9 +185,11 @@
       maxFullSizeMB: options.maxFullSizeMB !== undefined ? options.maxFullSizeMB : 20,
       maxRetries: options.maxRetries !== undefined ? options.maxRetries : 3,
       formData: options.formData,
-      downloadUrl: options.downloadUrl || function (encoded) {
-        return "/files/" + encoded;
-      },
+      downloadUrl:
+        options.downloadUrl ||
+        function (encoded) {
+          return "/files/" + encoded;
+        },
       beforeUpload: options.beforeUpload,
       beforeRequest: options.beforeRequest,
       elements: {
@@ -150,40 +202,47 @@
 
     this._listeners = {};
     this._busy = false;
+    this._inputLocked = false;
+    this._timedOut = false;
+    this._uploadTimeoutId = null;
     this._boundDisableFormSubmit = this._disableFormSubmit.bind(this);
     this._boundFileInputChange = this._onFileInputChange.bind(this);
     this._tickProgressDebounce = createThrottledUpdate(this._emitProgress.bind(this), 500);
 
+    // Decimal MB (1_000_000 bytes)
     this.chunkSizeBytes = 1000 * 1000 * this.o.chunkSizeMB;
     this.file = null;
     this.filename = "";
     this.filesize = -1;
     this.lastChunkNum = 1;
     this.method = "chunk";
-    this.chunkProgressPct = [];
     this.chunkProgressBytes = [];
     this.xhrs = [];
+    this._retryTimeoutIds = [];
     this.uploadGeneration = 0;
     this.abortedGeneration = -1;
     this.uploadStarted = 0;
-    this.uploadEnded = 0;
     this.uploadDuration = 0;
-    this.bytesLeft = 0;
-    this.secsLeft = 0;
-    this.upSpeedKBps = 0;
     this.upSpeedMbps = 0;
     this.currentFilename = "";
     this.encodedFilename = "";
     this.currentUrl = "";
+    this.ui = null;
+    this.unsupported = null;
 
     var hiddenEl = this.o.elements.hiddenInput;
     this.readonly = !!(hiddenEl && (hiddenEl.readOnly || hiddenEl.disabled));
 
+    if (hiddenEl) {
+      hiddenEl.bfu = this;
+    }
+    if (fileInput) {
+      fileInput.bfu = this;
+    }
+
     if (!global.Promise || !global.Blob || !global.FormData || canSlice === false) {
-      this.emit("error", {
-        message:
-          "Your browser appears to be outdated and does not support the upload mechanism being used."
-      });
+      this.unsupported =
+        "Your browser appears to be outdated and does not support the upload mechanism being used.";
       return this;
     }
 
@@ -194,12 +253,56 @@
     if (fileInput) {
       fileInput.addEventListener("change", this._boundFileInputChange);
     }
+    this._syncFileInputEnabled();
 
     return this;
   }
 
   BompusFileUpload.SKIP_UPLOAD = SKIP_UPLOAD;
   BompusFileUpload.ABORTED = ABORTED;
+  BompusFileUpload.TIMEOUT = TIMEOUT;
+  BompusFileUpload.TRANSPORT_ERROR = TRANSPORT_ERROR;
+  BompusFileUpload.DEFAULT_IMAGE_EXTS = DEFAULT_IMAGE_EXTS;
+
+  BompusFileUpload.isImageExt = function (ext, exts) {
+    var list = exts && exts.length ? exts : DEFAULT_IMAGE_EXTS;
+    return list.includes(String(ext || "").toLowerCase());
+  };
+
+  /**
+   * Subscribe once per form (same onChange fn is not added twice).
+   * WeakMap count is mutated only by engine _setBusy.
+   */
+  BompusFileUpload.trackFormBusy = function (form, opts) {
+    if (!form) {
+      return function () {};
+    }
+    opts = opts || {};
+    var onChange = typeof opts.onChange === "function" ? opts.onChange : null;
+    var entry = getFormBusyEntry(form);
+    if (onChange) {
+      if (entry.listeners.indexOf(onChange) === -1) {
+        entry.listeners.push(onChange);
+      }
+      onChange(entry.count);
+    }
+    return function untrack() {
+      if (!onChange) {
+        return;
+      }
+      entry.listeners = entry.listeners.filter(function (fn) {
+        return fn !== onChange;
+      });
+    };
+  };
+
+  BompusFileUpload.formBusyCount = function (form) {
+    if (!form) {
+      return 0;
+    }
+    var entry = formBusyState.get(form);
+    return entry ? entry.count : 0;
+  };
 
   BompusFileUpload.prototype.on = function (type, fn) {
     if (!this._listeners[type]) {
@@ -235,9 +338,28 @@
     }
   };
 
+  BompusFileUpload.prototype._emitError = function (err) {
+    var message = errMessage(err);
+    this.emit("error", { message: message, error: err });
+    return message;
+  };
+
   BompusFileUpload.prototype._disableFormSubmit = function (e) {
     e.preventDefault();
-    return false;
+  };
+
+  BompusFileUpload.prototype.isBusy = function () {
+    return this._busy === true;
+  };
+
+  /** Canonical file-input enabled policy: readonly || busy || beforeUpload lock. */
+  BompusFileUpload.prototype._syncFileInputEnabled = function () {
+    var fileInput = this.o.elements.fileInput;
+    if (!fileInput) {
+      return;
+    }
+    fileInput.disabled =
+      this.readonly === true || this._busy === true || this._inputLocked === true;
   };
 
   BompusFileUpload.prototype._setBusy = function (busy) {
@@ -249,31 +371,25 @@
     if (fileInput) {
       if (busy) {
         fileInput.classList.add("inProgress");
-        fileInput.disabled = true;
       } else {
         fileInput.classList.remove("inProgress");
-        if (this.readonly !== true) {
-          fileInput.disabled = false;
-        }
       }
     }
+    adjustFormBusy(this.o.elements.form, busy ? 1 : -1);
+    this._syncFileInputEnabled();
     this._syncFormSubmit();
     this.emit(busy ? "busy" : "idle");
   };
 
   BompusFileUpload.prototype._syncFormSubmit = function () {
     var form = this.o.elements.form;
-    var anyBusy = this._busy;
-    if (form) {
-      anyBusy = form.querySelectorAll("input[type=file].inProgress").length > 0;
-    }
+    var anyBusy = form ? BompusFileUpload.formBusyCount(form) > 0 : this._busy;
     if (!this.o.elements.formSubmitBtn && form) {
       this.o.elements.formSubmitBtn = form.querySelector("[type=submit]");
     }
     var submitBtn = this.o.elements.formSubmitBtn;
     if (anyBusy) {
       if (form) {
-        form.removeEventListener("submit", this._boundDisableFormSubmit);
         form.addEventListener("submit", this._boundDisableFormSubmit);
       }
       if (submitBtn) {
@@ -301,56 +417,44 @@
   };
 
   BompusFileUpload.prototype._emitProgress = function (isComplete) {
-    var pct = 0;
-    var detail;
-
     if (isComplete === true) {
       this._tickProgressDebounce.cancel();
-      this.uploadEnded = Date.now();
-      this.uploadDuration = Number(((this.uploadEnded - this.uploadStarted) / 1000).toFixed(2));
+      var uploadEnded = Date.now();
+      this.uploadDuration = Number(((uploadEnded - this.uploadStarted) / 1000).toFixed(2));
       if (this.o.elements.fileInput) {
         this.o.elements.fileInput.value = null;
       }
-      detail = {
+      this.emit("progress", {
         pct: 100,
         mbps: this.upSpeedMbps,
         secsLeft: 0,
         complete: true,
         duration: this.uploadDuration
-      };
-      this.emit("progress", detail);
+      });
       return;
     }
 
-    var chunkCount = this.chunkProgressPct.length;
-    if (chunkCount === 0) {
+    if (this.chunkProgressBytes.length === 0) {
       return;
     }
-
-    var pctSum = this.chunkProgressPct.reduce(function (a, b) {
-      return a + b;
-    }, 0);
-    pct = Math.min(pctSum / chunkCount, 99.9);
 
     var bytesSum = this.chunkProgressBytes.reduce(function (a, b) {
       return a + b;
     }, 0);
+    var pct =
+      this.filesize > 0 ? Math.min((bytesSum / this.filesize) * 100, 99.9) : 0;
     var elapsed = (Date.now() - this.uploadStarted) / 1000;
     var bps = elapsed ? bytesSum / elapsed : 0;
-
-    this.bytesLeft = Math.max(0, this.filesize - bytesSum);
-    this.upSpeedKBps = Math.ceil(bps / 1024);
-    this.upSpeedMbps = (this.upSpeedKBps / 125).toFixed(2);
-    if (elapsed && bps > 0) {
-      this.secsLeft = Math.max(1, Math.ceil(this.bytesLeft / bps));
-    } else {
-      this.secsLeft = "calculating";
-    }
+    var bytesLeft = Math.max(0, this.filesize - bytesSum);
+    var upSpeedKBps = Math.ceil(bps / 1024);
+    this.upSpeedMbps = (upSpeedKBps / 125).toFixed(2);
+    var secsLeft =
+      elapsed && bps > 0 ? Math.max(1, Math.ceil(bytesLeft / bps)) : "calculating";
 
     this.emit("progress", {
       pct: Number(pct.toFixed(1)),
       mbps: this.upSpeedMbps,
-      secsLeft: this.secsLeft,
+      secsLeft: secsLeft,
       complete: false
     });
   };
@@ -370,35 +474,66 @@
     if (this.filesize <= 0) {
       throw "File size could not be detected.";
     }
-    if (dot === -1 || extension.length === 0 || extension.length > 16 || /^[A-Za-z0-9]+$/.test(extension) === false) {
+    if (
+      dot === -1 ||
+      extension.length === 0 ||
+      extension.length > 16 ||
+      /^[A-Za-z0-9]+$/.test(extension) === false
+    ) {
       throw "File must end with a type, such as .jpg or .jpeg";
     }
   };
 
-  BompusFileUpload.prototype._onFileInputChange = async function (e) {
-    e.preventDefault();
+  BompusFileUpload.prototype._onFileInputChange = async function () {
     var fileInput = this.o.elements.fileInput;
     this.file = fileInput && fileInput.files ? fileInput.files[0] : null;
     this.method = "chunk";
 
-    try {
-      if (typeof this.o.beforeUpload === "function") {
+    // Block overlapping picks while beforeUpload runs (upload uses _busy)
+    this._inputLocked = true;
+    this._syncFileInputEnabled();
+
+    if (this.unsupported) {
+      this._emitError(this.unsupported);
+      this._inputLocked = false;
+      this._syncFileInputEnabled();
+      return;
+    }
+
+    if (typeof this.o.beforeUpload === "function") {
+      try {
         var result = await this.o.beforeUpload.call(this);
         if (result === SKIP_UPLOAD) {
+          this._inputLocked = false;
+          this._syncFileInputEnabled();
           return;
         }
-      }
-      await this.upload();
-    } catch (err) {
-      if (err === ABORTED) {
+      } catch (err) {
+        if (err === ABORTED || err === SKIP_UPLOAD) {
+          this._inputLocked = false;
+          this._syncFileInputEnabled();
+          return;
+        }
+        this._emitError(err);
+        this._inputLocked = false;
+        this._syncFileInputEnabled();
         return;
       }
-      var message = errMessage(err);
-      this.emit("error", { message: message, error: err });
+    }
+
+    this._inputLocked = false;
+    try {
+      await this.upload();
+    } catch (err) {
+      // upload() emits for TIMEOUT / validation / transfer failures; ABORTED is quiet
+      if (err === ABORTED || err === TIMEOUT) {
+        return;
+      }
+      this._syncFileInputEnabled();
     }
   };
 
-  BompusFileUpload.prototype.pruneFinishedXhrs = function () {
+  BompusFileUpload.prototype._pruneFinishedXhrs = function () {
     if (!this.xhrs || this.xhrs.length === 0) {
       return;
     }
@@ -407,8 +542,31 @@
     });
   };
 
-  BompusFileUpload.prototype.abort = function () {
-    this.abortedGeneration = this.uploadGeneration;
+  BompusFileUpload.prototype._clearUploadTimeout = function () {
+    if (this._uploadTimeoutId !== null) {
+      clearTimeout(this._uploadTimeoutId);
+      this._uploadTimeoutId = null;
+    }
+  };
+
+  /** Clear pending retry timers and reject their chunk promises (avoids mapLimit hang). */
+  BompusFileUpload.prototype._clearChunkRetries = function () {
+    if (!this._retryTimeoutIds || this._retryTimeoutIds.length === 0) {
+      this._retryTimeoutIds = [];
+      return;
+    }
+    this._retryTimeoutIds.forEach(function (entry) {
+      clearTimeout(entry.id);
+      if (typeof entry.reject === "function") {
+        entry.reject(ABORTED);
+      }
+    });
+    this._retryTimeoutIds = [];
+  };
+
+  /** Abort in-flight XHRs and pending chunk retries; does not clear busy/timeout/generation. */
+  BompusFileUpload.prototype._abortXhrsOnly = function () {
+    this._clearChunkRetries();
     if (this.xhrs && this.xhrs.length > 0) {
       this.xhrs.forEach(function (xhr) {
         if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") {
@@ -417,16 +575,55 @@
       });
       this.xhrs = [];
     }
+  };
+
+  BompusFileUpload.prototype.abort = function () {
+    this._clearUploadTimeout();
+    this._tickProgressDebounce.cancel();
+    this.abortedGeneration = this.uploadGeneration;
+    this._abortXhrsOnly();
     this._setBusy(false);
   };
 
-  // Back-compat alias used by some callers / docs during migration
-  BompusFileUpload.prototype.abortPendingUploads = function () {
-    this.abort();
+  BompusFileUpload.prototype._isStaleOrAborted = function (generation) {
+    return generation !== this.uploadGeneration || this.abortedGeneration === generation;
   };
 
-  BompusFileUpload.prototype.isStaleOrAborted = function (generation) {
-    return generation !== this.uploadGeneration || this.abortedGeneration === generation;
+  BompusFileUpload.prototype._throwIfStale = function (generation) {
+    if (this._isStaleOrAborted(generation) === true) {
+      throw this._timedOut ? TIMEOUT : ABORTED;
+    }
+  };
+
+  /** Clear timeout/XHR/retries + busy; emit once for TIMEOUT / non-ABORTED; then throw. */
+  BompusFileUpload.prototype._endAttempt = function (err) {
+    this._clearUploadTimeout();
+    this._abortXhrsOnly();
+    this._tickProgressDebounce.cancel();
+    this._setBusy(false);
+    if (err === TIMEOUT) {
+      this._emitError(TIMEOUT);
+    } else if (err !== ABORTED) {
+      this._emitError(err);
+    }
+    throw err;
+  };
+
+  BompusFileUpload.prototype.clearPendingSelection = function () {
+    var fileInput = this.o.elements.fileInput;
+    if (!fileInput) {
+      return;
+    }
+    fileInput.value = null;
+    this._syncFileInputEnabled();
+  };
+
+  BompusFileUpload.prototype.setReadonly = function (flag) {
+    this.readonly = flag === true;
+    this._syncFileInputEnabled();
+    if (this.ui && typeof this.ui.renderLabel === "function") {
+      this.ui.renderLabel(true);
+    }
   };
 
   BompusFileUpload.prototype.reset = function () {
@@ -437,7 +634,6 @@
     if (this.o.elements.fileInput && this.readonly !== true) {
       this.o.elements.fileInput.value = null;
     }
-    this._setBusy(false);
   };
 
   BompusFileUpload.prototype._mergeFormData = function (formData) {
@@ -456,7 +652,7 @@
     }
   };
 
-  BompusFileUpload.prototype.upload_chunk = function (myChunkNum, myAction, retryNum) {
+  BompusFileUpload.prototype._uploadChunk = function (myChunkNum, myAction, retryNum) {
     var self = this;
     var generation = this.uploadGeneration;
     var progressIdx = myChunkNum - 1;
@@ -465,12 +661,13 @@
     var start = (myChunkNum - 1) * this.chunkSizeBytes;
     var end = Math.min(start + this.chunkSizeBytes, this.filesize);
     var myChunkByteLen = end - start;
+    var maxFullBytes = this.o.maxFullSizeMB * 1000 * 1000;
 
     if (retryNum === undefined) {
       retryNum = 0;
     }
 
-    if (self.isStaleOrAborted(generation) === true) {
+    if (self._isStaleOrAborted(generation) === true) {
       return Promise.reject(ABORTED);
     }
 
@@ -487,9 +684,11 @@
       if (this.method === "chunk") {
         formData.append("file", this.file.slice(start, end));
       } else if (this.method === "full") {
-        if (this.file.size > this.o.maxFullSizeMB * 1024 * 1024) {
+        if (this.file.size > maxFullBytes) {
           return Promise.reject(
-            "File is too large. Please try again with a file smaller than " + this.o.maxFullSizeMB + "MB."
+            "File is too large. Please try again with a file smaller than " +
+              this.o.maxFullSizeMB +
+              "MB."
           );
         }
         formData.append("file", this.file);
@@ -497,7 +696,7 @@
     }
 
     return new Promise(function (resolve, reject) {
-      if (self.isStaleOrAborted(generation) === true) {
+      if (self._isStaleOrAborted(generation) === true) {
         reject(ABORTED);
         return;
       }
@@ -509,13 +708,12 @@
       xhr.upload.addEventListener(
         "progress",
         function (e) {
-          if (self.isStaleOrAborted(generation) === true) {
+          if (self._isStaleOrAborted(generation) === true) {
             return;
           }
           lengthComputable = e.lengthComputable;
           if (lengthComputable && myAction === "sendChunk") {
             self.chunkProgressBytes[progressIdx] = e.loaded;
-            self.chunkProgressPct[progressIdx] = (e.loaded / e.total) * 100;
             self._tickProgressDebounce(false);
           }
         },
@@ -523,11 +721,11 @@
       );
 
       xhr.onerror = function () {
-        if (self.isStaleOrAborted(generation) === true) {
+        if (self._isStaleOrAborted(generation) === true) {
           reject(ABORTED);
           return;
         }
-        fail("error");
+        fail(TRANSPORT_ERROR);
       };
 
       xhr.onabort = function () {
@@ -535,13 +733,13 @@
       };
 
       xhr.onload = function () {
-        if (self.isStaleOrAborted(generation) === true) {
+        if (self._isStaleOrAborted(generation) === true) {
           reject(ABORTED);
           return;
         }
 
         if (xhr.status < 200 || xhr.status >= 300) {
-          fail("error");
+          fail(TRANSPORT_ERROR);
           return;
         }
 
@@ -577,7 +775,6 @@
           case "sendChunk":
             if (!lengthComputable) {
               self.chunkProgressBytes[progressIdx] = myChunkByteLen;
-              self.chunkProgressPct[progressIdx] = 100;
               self._tickProgressDebounce(false);
             }
             break;
@@ -590,127 +787,182 @@
       };
 
       function fail(textStatus) {
-        if (self.isStaleOrAborted(generation) === true) {
+        if (self._isStaleOrAborted(generation) === true) {
           reject(ABORTED);
           return;
         }
 
         if (self.method === "chunk" && myAction === "sendChunk" && retryNum < self.o.maxRetries) {
           retryNum++;
-          setTimeout(function () {
-            self.upload_chunk(myChunkNum, myAction, retryNum).then(resolve, reject);
+          var retryGeneration = generation;
+          var entry = { id: null, reject: reject };
+          entry.id = setTimeout(function () {
+            self._retryTimeoutIds = self._retryTimeoutIds.filter(function (item) {
+              return item !== entry;
+            });
+            if (self._isStaleOrAborted(retryGeneration) === true) {
+              reject(ABORTED);
+              return;
+            }
+            self._uploadChunk(myChunkNum, myAction, retryNum).then(resolve, reject);
           }, retryNum * 1000);
+          self._retryTimeoutIds.push(entry);
           return;
         }
 
-        reject(textStatus || "error");
+        reject(textStatus || TRANSPORT_ERROR);
       }
 
-      self.pruneFinishedXhrs();
+      self._pruneFinishedXhrs();
       self.xhrs.push(xhr);
       xhr.send(formData);
     });
   };
 
-  BompusFileUpload.prototype.upload = async function (file) {
+  BompusFileUpload.prototype._finishSuccess = function (fileName) {
+    this._clearUploadTimeout();
+    this._setFilenameState(fileName);
+    this._setBusy(false);
+    var payload = {
+      fileName: fileName,
+      duration: this.uploadDuration,
+      url: this.currentUrl
+    };
+    this.emit("complete", payload);
+    return payload;
+  };
+
+  BompusFileUpload.prototype._runFullFallback = async function (generation) {
+    // Kill chunk XHRs only — keep generation, busy, and timeout for this attempt.
+    this._abortXhrsOnly();
+    this.method = "full";
+    this.lastChunkNum = 1;
+    this.chunkProgressBytes = [0];
+    this.xhrs = [];
+
+    await this._uploadChunk(0, "initFile", 0);
+    this._throwIfStale(generation);
+
+    this.uploadStarted = Date.now();
+    await this._uploadChunk(1, "sendChunk", 0);
+    this._throwIfStale(generation);
+
+    var combineData = await this._uploadChunk(1, "combineChunks", 0);
+    this._throwIfStale(generation);
+
+    return this._finishSuccess(combineData.file_name);
+  };
+
+  /**
+   * Start or continue an upload.
+   * - Rejects ABORTED on user/stale abort (no error event).
+   * - Rejects TIMEOUT on opts.timeoutMs (emits error once).
+   * - Other failures emit error once then reject.
+   */
+  BompusFileUpload.prototype.upload = async function (file, opts) {
     if (file) {
       this.file = file;
     }
-    this.method = this.method || "chunk";
-    this._validateFile();
+    opts = opts || {};
+    var timeoutMs = typeof opts.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : 0;
+
+    if (this.unsupported) {
+      this._emitError(this.unsupported);
+      throw this.unsupported;
+    }
+
+    if (this._busy === true) {
+      var busyErr = "An upload is already in progress.";
+      this._emitError(busyErr);
+      throw busyErr;
+    }
+
+    this.method = "chunk";
+
+    try {
+      this._validateFile();
+    } catch (err) {
+      this._emitError(err);
+      throw err;
+    }
 
     this.uploadGeneration++;
     var generation = this.uploadGeneration;
 
-    this.chunkProgressPct = [];
+    this._timedOut = false;
     this.chunkProgressBytes = [];
     this.xhrs = [];
+    this._clearChunkRetries();
+    this._clearUploadTimeout();
 
-    if (this.method === "chunk") {
-      this.lastChunkNum = Math.max(1, Math.ceil(this.filesize / this.chunkSizeBytes));
-    } else {
-      this.lastChunkNum = 1;
-    }
+    this.lastChunkNum = Math.max(1, Math.ceil(this.filesize / this.chunkSizeBytes));
 
     for (var i = 0; i < this.lastChunkNum; i++) {
-      this.chunkProgressPct[i] = 0;
       this.chunkProgressBytes[i] = 0;
+    }
+
+    if (timeoutMs > 0) {
+      var selfTimeout = this;
+      this._uploadTimeoutId = setTimeout(function () {
+        // Soft-stop: keep form busy until upload() settles (TIMEOUT path).
+        selfTimeout._timedOut = true;
+        selfTimeout.abortedGeneration = selfTimeout.uploadGeneration;
+        selfTimeout._abortXhrsOnly();
+        selfTimeout._clearUploadTimeout();
+      }, timeoutMs);
     }
 
     this._setBusy(true);
 
     try {
-      await this.upload_chunk(0, "initFile", 0);
-
-      if (this.isStaleOrAborted(generation) === true) {
-        throw ABORTED;
-      }
+      await this._uploadChunk(0, "initFile", 0);
+      this._throwIfStale(generation);
 
       this.uploadStarted = Date.now();
 
       var self = this;
-      await mapLimit(
-        this.lastChunkNum,
-        this.o.parallelLimit,
-        function (n) {
-          return self.upload_chunk(n + 1, "sendChunk", 0);
-        },
-        function () {
-          self.abort();
-        }
-      );
+      var sawFirstError = false;
+      await mapLimit(this.lastChunkNum, this.o.parallelLimit, function (n) {
+        return self._uploadChunk(n + 1, "sendChunk", 0).catch(function (err) {
+          if (sawFirstError === false) {
+            sawFirstError = true;
+            self._abortXhrsOnly();
+          }
+          throw err;
+        });
+      });
 
-      if (this.isStaleOrAborted(generation) === true) {
-        throw ABORTED;
-      }
+      this._throwIfStale(generation);
 
-      var combineData = await this.upload_chunk(this.lastChunkNum, "combineChunks", 0);
+      var combineData = await this._uploadChunk(this.lastChunkNum, "combineChunks", 0);
+      this._throwIfStale(generation);
 
-      if (this.isStaleOrAborted(generation) === true) {
-        throw ABORTED;
-      }
-
-      this._setFilenameState(combineData.file_name);
-      this._setBusy(false);
-
-      var payload = {
-        fileName: combineData.file_name,
-        duration: this.uploadDuration,
-        url: this.currentUrl
-      };
-      this.emit("complete", payload);
-      return payload;
+      return this._finishSuccess(combineData.file_name);
     } catch (err) {
       if (generation !== this.uploadGeneration) {
-        throw ABORTED;
+        throw this._timedOut ? TIMEOUT : ABORTED;
       }
 
-      if (err !== ABORTED) {
-        this.abort();
-      } else {
-        this._setBusy(false);
+      var finalErr = this._timedOut ? TIMEOUT : err;
+
+      if (finalErr === ABORTED || finalErr === TIMEOUT) {
+        this._endAttempt(finalErr);
       }
 
-      if (err === ABORTED) {
-        throw err;
+      // Transport/HTTP failures only (not server / Unknown Error* / app messages)
+      if (finalErr === TRANSPORT_ERROR && this.method === "chunk") {
+        try {
+          return await this._runFullFallback(generation);
+        } catch (fallbackErr) {
+          finalErr = this._timedOut ? TIMEOUT : fallbackErr;
+          if (finalErr === ABORTED || finalErr === TIMEOUT) {
+            this._endAttempt(finalErr);
+          }
+        }
       }
 
-      var errStr = errMessage(err);
-
-      if (errStr.indexOf("Unknown Error") === -1 && this.method === "chunk") {
-        this.method = "full";
-        return await this.upload();
-      }
-
-      this._setBusy(false);
-      this.emit("error", { message: errStr, error: err });
-      throw err;
+      this._endAttempt(finalErr);
     }
-  };
-
-  // Alias
-  BompusFileUpload.prototype.upload_file = function (file) {
-    return this.upload(file);
   };
 
   // ---------------------------------------------------------------------------
@@ -726,23 +978,22 @@
 
   function defaultLinkClass(filename, imageExts) {
     var ext = (filename.split(".").pop() || "").toLowerCase();
-    for (var i = 0; i < imageExts.length; i++) {
-      if (imageExts[i] === ext) {
-        return "imgLink";
-      }
-    }
-    return "downloadLink";
+    return BompusFileUpload.isImageExt(ext, imageExts) ? "imgLink" : "downloadLink";
   }
 
   BompusFileUpload.mountDefaultUi = function (uploader, uiOpts) {
+    if (uploader.ui) {
+      return uploader.ui;
+    }
+
     uiOpts = uiOpts || {};
     var fieldName = uploader.o.fieldName;
+    var fieldSel = cssAttrEscape(fieldName);
     var infoText =
-      uiOpts.infoText ||
-      document.querySelector('div[data-bfu-text="' + fieldName + '"]');
+      uiOpts.infoText || document.querySelector('div[data-bfu-text="' + fieldSel + '"]');
     var linkNewUploads = uiOpts.linkNewUploads === true;
     var showRemove = uiOpts.showRemove !== false;
-    var imageExts = uiOpts.imageExts || ["jpg", "jpeg", "png", "gif", "webp"];
+    var imageExts = uiOpts.imageExts || DEFAULT_IMAGE_EXTS.slice();
     var extraActions = uiOpts.extraActions;
     var barFill = null;
     var barText = null;
@@ -781,7 +1032,7 @@
         return;
       }
       statusActive = false;
-      if (uploader._busy !== true) {
+      if (uploader.isBusy() !== true) {
         renderLabel(true);
       } else {
         clearInfo();
@@ -816,10 +1067,6 @@
       wrap.style.cssFloat = "left";
       wrap.className = uploader.readonly ? "bfu-dl-readonly" : "bfu-dl-editable";
 
-      var pre = document.createElement("span");
-      pre.className = "bfu-dl-pre";
-      wrap.appendChild(pre);
-
       var showLink = fromInit === true || linkNewUploads === true;
       if (showLink === true) {
         var dl = document.createElement("a");
@@ -841,7 +1088,6 @@
         wrap.appendChild(divider);
 
         var remove = document.createElement("a");
-        remove.target = "_blank";
         remove.className = "bfu-remove";
         remove.href = "#";
         remove.textContent = "Remove";
@@ -894,10 +1140,6 @@
       );
     });
 
-    uploader.on("idle", function () {
-      // label / error handlers refresh UI; avoid wiping mid-status
-    });
-
     uploader.on("complete", function () {
       renderLabel(false);
     });
@@ -905,29 +1147,29 @@
     uploader.on("error", function (detail) {
       var err = document.createElement("span");
       err.className = "bfu-error";
-      err.textContent = "Error: " + String(detail && detail.message ? detail.message : "Unknown error.");
+      err.textContent =
+        "Error: " + String(detail && detail.message ? detail.message : "Unknown error.");
       setInfoNode(err);
       if (uploader.readonly !== true) {
-        setDisplay(uploader.o.elements.fileInput, true);
-        if (uploader.o.elements.fileInput) {
-          uploader.o.elements.fileInput.value = null;
+        var fileInput = uploader.o.elements.fileInput;
+        setDisplay(fileInput, true);
+        if (fileInput) {
+          fileInput.value = null;
         }
       }
     });
 
-    // Initial paint
-    if (uploader.currentFilename) {
-      renderLabel(true);
-    } else if (uploader.readonly === true) {
-      renderLabel(true);
-    }
+    // Always paint idle (including empty editable) so enable/show runs
+    renderLabel(true);
 
-    return {
+    var api = {
       setStatus: setStatus,
       clearStatus: clearStatus,
       renderLabel: renderLabel,
       clearInfo: clearInfo
     };
+    uploader.ui = api;
+    return api;
   };
 
   global.BompusFileUpload = BompusFileUpload;
