@@ -108,6 +108,14 @@ php -S localhost:8080
 # http://localhost:8080/example.html
 ```
 
+## Releasing
+
+1. Bump version + CHANGELOG + CDN URLs, commit, push `master`.
+2. Tag and push `X.Y.Z` (jsDelivr).
+3. `gh release create X.Y.Z` with that version’s CHANGELOG section as notes (required — keep the Releases page complete). No Release assets; CDN minifies from the tag.
+
+See [AGENTS.md](AGENTS.md) for the full checklist.
+
 ## WARNING
 
 **Do not use example `upload.php` in production** without auth, type checks, size limits, and path safety.
