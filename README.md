@@ -4,7 +4,7 @@ Parallel chunked file uploads. **Vanilla JS — zero dependencies.**
 
 **v3.0:** headless engine + optional `mountDefaultUi`, form busy tracking, `el.bfu` registry.
 
-Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@3.0.0`**.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@3.0.1`**.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -14,9 +14,9 @@ Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR uplo
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/bompus-chunked-file-upload.min.js  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/no-photo.png
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.1/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.1/bompus-chunked-file-upload.min.js  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.1/no-photo.png
 
 ## Quick start
 
@@ -28,8 +28,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.1/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.1/bompus-chunked-file-upload.min.js"></script>
 <script>
   var form = document.getElementById("post");
   var up = BompusFileUpload({
@@ -81,7 +81,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.0/no-photo.png
 - Registry: `hiddenInput.bfu` / `fileInput.bfu` → uploader instance
 - Sentinels: `SKIP_UPLOAD`, `ABORTED`, `TIMEOUT`, `TRANSPORT_ERROR` (identity `===` only; `.name` for debug)
 - `up.isBusy()` — whether this uploader holds the busy lock
-- Form busy: `trackFormBusy(form, { onChange })` once per form, `formBusyCount(form)`
+- Form busy: `trackFormBusy(form, { onChange })` once per form, `formBusyCount(form)`, `holdFormBusy(form)` → `release()`
+- Form busy also held during `beforeUpload` / file-input lock (submit blocked; no transfer progress UI)
 - `BompusFileUpload.isImageExt(ext)`, `DEFAULT_IMAGE_EXTS` (includes avif)
 
 ## Default UI

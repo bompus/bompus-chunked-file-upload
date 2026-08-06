@@ -1,5 +1,5 @@
 /*!
- * Bompus Chunked File Upload v3.0.0
+ * Bompus Chunked File Upload v3.0.1
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * Headless chunked upload engine + optional mountDefaultUi (same file for CDN).
@@ -151,6 +151,32 @@
     }
   }
 
+  /** One submit blocker per form; driven by formBusyCount. */
+  function syncFormSubmitForForm(form) {
+    if (!form) {
+      return;
+    }
+    var entry = getFormBusyEntry(form);
+    if (!entry.boundDisableSubmit) {
+      entry.boundDisableSubmit = function (e) {
+        e.preventDefault();
+      };
+    }
+    var anyBusy = entry.count > 0;
+    var submitBtn = form.querySelector("[type=submit]");
+    if (anyBusy) {
+      form.addEventListener("submit", entry.boundDisableSubmit);
+      if (submitBtn) {
+        submitBtn.disabled = true;
+      }
+    } else {
+      form.removeEventListener("submit", entry.boundDisableSubmit);
+      if (submitBtn) {
+        submitBtn.disabled = false;
+      }
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Engine (headless)
   // ---------------------------------------------------------------------------
@@ -203,9 +229,9 @@
     this._listeners = {};
     this._busy = false;
     this._inputLocked = false;
+    this._formBusyHeld = false;
     this._timedOut = false;
     this._uploadTimeoutId = null;
-    this._boundDisableFormSubmit = this._disableFormSubmit.bind(this);
     this._boundFileInputChange = this._onFileInputChange.bind(this);
     this._tickProgressDebounce = createThrottledUpdate(this._emitProgress.bind(this), 500);
 
@@ -271,7 +297,7 @@
 
   /**
    * Subscribe once per form (same onChange fn is not added twice).
-   * WeakMap count is mutated only by engine _setBusy.
+   * WeakMap count: _setBusy, beforeUpload input-lock, and holdFormBusy.
    */
   BompusFileUpload.trackFormBusy = function (form, opts) {
     if (!form) {
@@ -302,6 +328,27 @@
     }
     var entry = formBusyState.get(form);
     return entry ? entry.count : 0;
+  };
+
+  /**
+   * Hold form busy (submit blocked + trackFormBusy) outside upload/_busy.
+   * Returns an idempotent release function.
+   */
+  BompusFileUpload.holdFormBusy = function (form) {
+    if (!form) {
+      return function () {};
+    }
+    adjustFormBusy(form, 1);
+    syncFormSubmitForForm(form);
+    var released = false;
+    return function release() {
+      if (released === true) {
+        return;
+      }
+      released = true;
+      adjustFormBusy(form, -1);
+      syncFormSubmitForForm(form);
+    };
   };
 
   BompusFileUpload.prototype.on = function (type, fn) {
@@ -344,10 +391,6 @@
     return message;
   };
 
-  BompusFileUpload.prototype._disableFormSubmit = function (e) {
-    e.preventDefault();
-  };
-
   BompusFileUpload.prototype.isBusy = function () {
     return this._busy === true;
   };
@@ -360,6 +403,27 @@
     }
     fileInput.disabled =
       this.readonly === true || this._busy === true || this._inputLocked === true;
+  };
+
+  /** Lock file input during beforeUpload; also holds form busy (not transfer _busy). */
+  BompusFileUpload.prototype._setInputLocked = function (locked) {
+    if (this._inputLocked === locked) {
+      return;
+    }
+    this._inputLocked = locked;
+    adjustFormBusy(this.o.elements.form, locked ? 1 : -1);
+    this._syncFileInputEnabled();
+    this._syncFormSubmit();
+  };
+
+  /** Drop a proceed-handoff form-busy hold that never reached _setBusy(true). */
+  BompusFileUpload.prototype._releaseFormBusyHold = function () {
+    if (this._formBusyHeld !== true) {
+      return;
+    }
+    this._formBusyHeld = false;
+    adjustFormBusy(this.o.elements.form, -1);
+    this._syncFormSubmit();
   };
 
   BompusFileUpload.prototype._setBusy = function (busy) {
@@ -375,7 +439,12 @@
         fileInput.classList.remove("inProgress");
       }
     }
-    adjustFormBusy(this.o.elements.form, busy ? 1 : -1);
+    if (busy === true && this._formBusyHeld === true) {
+      // Ownership transfer from beforeUpload / pick hold — no double-count.
+      this._formBusyHeld = false;
+    } else {
+      adjustFormBusy(this.o.elements.form, busy ? 1 : -1);
+    }
     this._syncFileInputEnabled();
     this._syncFormSubmit();
     this.emit(busy ? "busy" : "idle");
@@ -383,26 +452,14 @@
 
   BompusFileUpload.prototype._syncFormSubmit = function () {
     var form = this.o.elements.form;
-    var anyBusy = form ? BompusFileUpload.formBusyCount(form) > 0 : this._busy;
-    if (!this.o.elements.formSubmitBtn && form) {
-      this.o.elements.formSubmitBtn = form.querySelector("[type=submit]");
+    if (form) {
+      syncFormSubmitForForm(form);
+      return;
     }
-    var submitBtn = this.o.elements.formSubmitBtn;
-    if (anyBusy) {
-      if (form) {
-        form.addEventListener("submit", this._boundDisableFormSubmit);
-      }
-      if (submitBtn) {
-        submitBtn.disabled = true;
-      }
-    } else {
-      if (form) {
-        form.removeEventListener("submit", this._boundDisableFormSubmit);
-      }
-      if (submitBtn) {
-        submitBtn.disabled = false;
-      }
+    if (!this.o.elements.formSubmitBtn) {
+      return;
     }
+    this.o.elements.formSubmitBtn.disabled = this._busy === true;
   };
 
   BompusFileUpload.prototype._setFilenameState = function (filename) {
@@ -489,14 +546,12 @@
     this.file = fileInput && fileInput.files ? fileInput.files[0] : null;
     this.method = "chunk";
 
-    // Block overlapping picks while beforeUpload runs (upload uses _busy)
-    this._inputLocked = true;
-    this._syncFileInputEnabled();
+    // Block overlapping picks + hold form busy while beforeUpload runs (upload uses _busy)
+    this._setInputLocked(true);
 
     if (this.unsupported) {
       this._emitError(this.unsupported);
-      this._inputLocked = false;
-      this._syncFileInputEnabled();
+      this._setInputLocked(false);
       return;
     }
 
@@ -504,28 +559,29 @@
       try {
         var result = await this.o.beforeUpload.call(this);
         if (result === SKIP_UPLOAD) {
-          this._inputLocked = false;
-          this._syncFileInputEnabled();
+          this._setInputLocked(false);
           return;
         }
       } catch (err) {
         if (err === ABORTED || err === SKIP_UPLOAD) {
-          this._inputLocked = false;
-          this._syncFileInputEnabled();
+          this._setInputLocked(false);
           return;
         }
         this._emitError(err);
-        this._inputLocked = false;
-        this._syncFileInputEnabled();
+        this._setInputLocked(false);
         return;
       }
     }
 
+    // Handoff form-busy into upload() without a SAVE gap or double-count.
     this._inputLocked = false;
+    this._formBusyHeld = true;
+    this._syncFileInputEnabled();
     try {
       await this.upload();
     } catch (err) {
       // upload() emits for TIMEOUT / validation / transfer failures; ABORTED is quiet
+      this._releaseFormBusyHold();
       if (err === ABORTED || err === TIMEOUT) {
         return;
       }
@@ -867,11 +923,13 @@
     var timeoutMs = typeof opts.timeoutMs === "number" && opts.timeoutMs > 0 ? opts.timeoutMs : 0;
 
     if (this.unsupported) {
+      this._releaseFormBusyHold();
       this._emitError(this.unsupported);
       throw this.unsupported;
     }
 
     if (this._busy === true) {
+      this._releaseFormBusyHold();
       var busyErr = "An upload is already in progress.";
       this._emitError(busyErr);
       throw busyErr;
@@ -882,6 +940,7 @@
     try {
       this._validateFile();
     } catch (err) {
+      this._releaseFormBusyHold();
       this._emitError(err);
       throw err;
     }

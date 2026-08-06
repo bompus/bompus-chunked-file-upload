@@ -1,5 +1,17 @@
 # Changelog
 
+## [3.0.1] — 2026-08-06
+
+### Added
+
+- **`BompusFileUpload.holdFormBusy(form)`** — bump form busy (submit blocked + `trackFormBusy`) outside transfer `_busy`; returns idempotent `release()`
+- Form busy during **`beforeUpload` / file-input lock** (not only during upload transfer)
+
+### Fixed
+
+- SAVE / submit could run during long `beforeUpload` (e.g. image editor) because `_inputLocked` did not affect `formBusyCount`
+- Proceed handoff into `upload()` keeps form busy without a gap and without double-counting
+
 ## [3.0.0] — 2026-08-06
 
 ### Breaking
@@ -33,8 +45,8 @@
 
 ## [2.1.0] — 2026-08-06
 
-Headless engine + optional `mountDefaultUi`. Prefer **3.0.0**.
+Headless engine + optional `mountDefaultUi`. Prefer **3.0.1**.
 
 ## [2.0.0] — 2026-08-06
 
-Vanilla port (historical). Prefer **3.0.0**.
+Vanilla port (historical). Prefer **3.0.1**.
