@@ -1,25 +1,25 @@
 # bompus-chunked-file-upload
 
-Upload files from a web browser in parallel chunks. Vanilla JS — **no jQuery**.
+Parallel chunked file uploads. **Vanilla JS — no jQuery.**
 
-Formerly published as [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (GitHub redirects after rename).
+**v2.1:** headless upload engine + optional `mountDefaultUi`.
 
-See [CHANGELOG.md](CHANGELOG.md) for release history.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (archived / deprecated). Prefer CDN **`@2.1.0`**.
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Requirements
 
-- A modern browser with **Promise** and **async/await**, plus `Blob`/`File.slice`, `FormData`, and `XMLHttpRequest` upload progress
+Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR upload progress.
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.0.0/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.0.0/bompus-chunked-file-upload.min.js
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.1.0/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.1.0/bompus-chunked-file-upload.min.js
 
-Optional placeholder image:
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.1.0/no-photo.png
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.0.0/no-photo.png
-
-## Quick start (markup)
+## Quick start
 
 ```html
 <form>
@@ -29,116 +29,71 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.0.0/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.0.0/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.0.0/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.1.0/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@2.1.0/bompus-chunked-file-upload.min.js"></script>
+<script>
+  var up = BompusFileUpload({
+    postUrl: "/upload.php",
+    fieldName: "upload-1",
+    formData: { meta: "upload-1" },
+    downloadUrl: function (encoded) { return "/files/" + encoded; }
+  });
+  BompusFileUpload.mountDefaultUi(up, { linkNewUploads: true });
+</script>
 ```
 
-## Full working example
+## Engine options
 
-Open [`example.html`](example.html) from an HTTP server in this directory (needs [`upload.php`](upload.php)):
+| Option | Default | Description |
+|--------|---------|-------------|
+| `postUrl` | `"/path/to/upload.php"` | Upload endpoint |
+| `fieldName` | `"bompus-file-1"` | Resolves `data-bfu-*` |
+| `formData` | — | Object or `() => object` merged into every request |
+| `downloadUrl` | `(enc) => "/files/"+enc` | Build download URL |
+| `beforeUpload` | — | async; `SKIP_UPLOAD` / throw / proceed |
+| `beforeRequest` | — | `(formData) => void` after merge |
+| `chunkSizeMB` | `0.98` | Chunk size |
+| `parallelLimit` | `5` | Max concurrent chunk POSTs |
+| `maxFullSizeMB` | `20` | Full-POST fallback max |
+| `maxRetries` | `3` | Per-chunk retries |
+
+## `beforeUpload` contract
+
+| Outcome | Behavior |
+|---------|----------|
+| resolve / return | Validate and `upload()` current `this.file` |
+| throw / reject | `error` event (UI may render) |
+| `BompusFileUpload.SKIP_UPLOAD` | Stop; no upload |
+
+## Events / methods
+
+- Events: `busy`, `idle`, `progress`, `complete`, `error` — `up.on("complete", fn)`
+- `await up.upload(file?)` — success `{ fileName, duration, url }`; abort → `BompusFileUpload.ABORTED`
+- `up.abort()`, `up.reset()`
+- Sentinels: `BompusFileUpload.SKIP_UPLOAD`, `BompusFileUpload.ABORTED`
+
+## Default UI
+
+```js
+var ui = BompusFileUpload.mountDefaultUi(up, {
+  linkNewUploads: false,
+  imageExts: ["jpg", "jpeg", "png", "gif", "webp", "avif"],
+  extraActions: function (ctx) { return []; },
+  showRemove: true
+});
+ui.setStatus("Preparing…");
+ui.clearStatus();
+```
+
+## Demo
 
 ```bash
 php -S localhost:8080
 # http://localhost:8080/example.html
 ```
 
-The PHP demo page with image crop (jQuery used only for croppie/featherlight) is [`index.php`](index.php).
-
-## Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `postUrl` | `"/path/to/upload.php"` | Upload endpoint |
-| `fieldName` | `"bompus-file-1"` | Matches `data-bfu-*` attributes |
-| `chunkSizeMB` | `0.98` | Chunk size in MB |
-| `parallelLimit` | `5` | Max concurrent chunk POSTs (clamped to ≥ 1) |
-| `maxFullSizeMB` | `20` | Max size when falling back to a single non-chunked POST |
-| `maxRetries` | `3` | Retries per failed `sendChunk` (0 disables) |
-
-## `fileSelected` Promise contract
-
-| Outcome | BFU behavior |
-|---------|----------------|
-| resolve / return `undefined` / `null` | Validate and upload `this.file` |
-| reject / throw (string or `Error`) | `setError(message)` |
-| resolve `BompusFileUpload.SKIP_UPLOAD` | Stop; no BFU upload (you already uploaded or cancelled) |
-
-## Full hooks example
-
-```js
-BompusFileUpload({
-  postUrl: "/upload.php",
-  fieldName: "upload-1",
-  chunkSizeMB: 0.98,
-  parallelLimit: 5,
-  maxFullSizeMB: 20,
-  maxRetries: 3,
-  hooks: {
-    getFileDownloadUrl: function (uriEncodedFilename) {
-      return "/files/" + uriEncodedFilename;
-    },
-
-    getFileDownloadLinkClassName: function (uriEncodedFilename) {
-      var ext = (uriEncodedFilename.split(".").pop() || "").toLowerCase();
-      if (ext === "jpg" || ext === "jpeg" || ext === "png" || ext === "gif" || ext === "webp") {
-        return "imgLink";
-      }
-      return "downloadLink";
-    },
-
-    // dlEl / removeEl are HTMLElements
-    setText: function (fromInit, dlEl, removeEl) {
-      var tmpElm = document.createElement("div");
-      tmpElm.style.cssFloat = "left";
-      tmpElm.className = this.readonly ? "bfu-dl-readonly" : "bfu-dl-editable";
-      var pre = document.createElement("span");
-      pre.className = "bfu-dl-pre";
-      tmpElm.append(pre, dlEl);
-      if (this.readonly === false) {
-        var divider = document.createElement("span");
-        divider.className = "bfu-dl-divider";
-        divider.innerHTML = "&nbsp;&nbsp;";
-        tmpElm.append(divider, removeEl);
-      }
-      this.setInfoText(tmpElm);
-    },
-
-    fileSelected: function () {
-      // return;                                    // proceed with upload
-      // return BompusFileUpload.SKIP_UPLOAD;       // you handled upload/cancel
-      // return Promise.reject("Nope");             // show error, no upload
-    },
-
-    beforeChunkSend: function (formData) {
-      formData.append("action", "my_upload_action");
-      formData.append("post_id", "123");
-    },
-
-    progressStart: function () {},
-    progressEnd: function () {},
-
-    uploadComplete: function () {
-      console.log("done in", this.uploadDuration, "s", this.currentFilename);
-    }
-  }
-});
-```
-
-### Useful instance fields / methods
-
-- `this.file`, `this.filename`, `this.filesize`, `this.currentFilename`, `this.currentUrl`
-- `this.uploadDuration`, `this.method` (`"chunk"` \| `"full"`)
-- `this.reset()`, `this.setError(message)`, `this.setText(filename, fromInit)`
-- `this.upload_file()` — Promise; start upload of the current `this.file`
-- `this.abortPendingUploads()` — abort in-flight XHRs for the current generation
-- `this.releaseUploadControls()` — clear `inProgress` without wiping a caller’s error text
-
-## Server protocol (summary)
-
-The client POSTs `multipart/form-data` with fields including `chunk_action` (`initFile` \| `sendChunk` \| `combineChunks`), `file_name`, `file_size`, `file_chunk`, `file_chunk_max`, `chunk_method`, `retry_num`, and for `sendChunk` a `file` blob. Expect JSON like `{ "success": true, "data": { "file_name": "..." } }`.
-
-**Do not use the example `upload.php` in production** without hardening (auth, type checks, size limits, path safety).
+Crop demo (`index.php`) loads jQuery only for croppie/featherlight.
 
 ## WARNING
 
-**DO NOT USE the example upload.php in production. You will want to make sure server-side that you only accept and validate desired file types.**
+**Do not use example `upload.php` in production** without auth, type checks, size limits, and path safety.

@@ -1,20 +1,13 @@
 /*!
- * Bompus Chunked File Upload v2.0.0
+ * Bompus Chunked File Upload v2.1.0
  * https://github.com/bompus/bompus-chunked-file-upload
  *
- * Requires: modern browser with Promise + async/await, Blob/File.slice, FormData, XMLHttpRequest upload
+ * Headless chunked upload engine + optional mountDefaultUi.
+ * Requires: Promise/async-await, Blob/File.slice, FormData, XMLHttpRequest upload.
  * No jQuery.
  *
  * Copyright Aaron Queen
  */
-
-// some tests on my 1 gigabit connection for a 96MB file
-// 500KB, 5  parallel = 18 seconds
-// 980KB, 1  parallel = ???
-// 980KB, 3  parallel = 21 seconds
-// 980KB, 5  parallel = 15 seconds ***** THE CHOSEN DEFAULT *****
-// 980KB, 10 parallel = 17 seconds
-// 2MB,   5  parallel = 14 seconds, random lag spikes, tests above 2MB also showed these random lag spikes
 
 (function (global) {
   "use strict";
@@ -22,39 +15,6 @@
   var SKIP_UPLOAD = Object.freeze({ skipUpload: true });
   var ABORTED = Object.freeze({ __bfuAborted: true });
 
-  function deepMerge(target, source) {
-    if (source === null || source === undefined) {
-      return target;
-    }
-    var out = target;
-    var keys = Object.keys(source);
-    for (var i = 0; i < keys.length; i++) {
-      var key = keys[i];
-      var srcVal = source[key];
-      if (srcVal && typeof srcVal === "object" && srcVal.constructor === Object) {
-        if (!out[key] || typeof out[key] !== "object" || out[key].constructor !== Object) {
-          out[key] = {};
-        }
-        deepMerge(out[key], srcVal);
-      } else {
-        out[key] = srcVal;
-      }
-    }
-    return out;
-  }
-
-  function decodeHtmlEntities(str) {
-    var ta = document.createElement("textarea");
-    ta.innerHTML = str;
-    return ta.value;
-  }
-
-  function setDisplay(el, visible) {
-    if (!el) {
-      return;
-    }
-    el.style.display = visible ? "" : "none";
-  }
 
   function createThrottledUpdate(fn, wait) {
     var interval = null;
@@ -126,95 +86,75 @@
     }
   }
 
+  function decodeHtmlEntities(str) {
+    var ta = document.createElement("textarea");
+    ta.innerHTML = str;
+    return ta.value;
+  }
+
+  function errMessage(err) {
+    if (typeof err === "string") {
+      return err;
+    }
+    if (err && err.message) {
+      return err.message;
+    }
+    return String(err);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Engine (headless)
+  // ---------------------------------------------------------------------------
+
   function BompusFileUpload(options) {
     if (this instanceof BompusFileUpload === false) {
       return new BompusFileUpload(options);
     }
 
+    options = options || {};
     var fieldName = options.fieldName !== undefined ? options.fieldName : "bompus-file-1";
-    var hiddenInput = document.querySelector('input[type=hidden][data-bfu-hidden="' + fieldName + '"]');
-    var form = hiddenInput ? hiddenInput.closest("form") : null;
-
-    this.o = deepMerge(
-      {
-        postUrl: "/path/to/upload.php",
-        fieldName: fieldName,
-        chunkSizeMB: 0.98,
-        parallelLimit: 5,
-        maxFullSizeMB: 20,
-        maxRetries: 3,
-
-        elements: {
-          form: form,
-          formSubmitBtn: form ? form.querySelector("[type=submit]") : null,
-          infoText: document.querySelector('div[data-bfu-text="' + fieldName + '"]'),
-          fileInput: document.querySelector('input[type=file][data-bfu-file="' + fieldName + '"]'),
-          hiddenInput: hiddenInput
-        },
-
-        hooks: {
-          getFileDownloadUrl: function (uriEncodedFilename) {
-            return "/files/" + uriEncodedFilename;
-          },
-          getFileDownloadLinkClassName: function (uriEncodedFilename) {
-            var linkClass = "downloadLink";
-            var re = /(?:\.([^.]+))?$/;
-            var extMatch = re.exec(uriEncodedFilename);
-            var ext = (extMatch && extMatch[1] ? extMatch[1] : "").toLowerCase();
-            if (ext === "jpg" || ext === "jpeg" || ext === "png" || ext === "gif" || ext === "webp") {
-              linkClass = "imgLink";
-            }
-            return linkClass;
-          },
-          setText: function (fromInit, dlEl, removeEl) {
-            var tmpElm = document.createElement("div");
-            tmpElm.style.cssFloat = "left";
-            tmpElm.className = this.readonly ? "bfu-dl-readonly" : "bfu-dl-editable";
-
-            var pre = document.createElement("span");
-            pre.className = "bfu-dl-pre";
-            tmpElm.appendChild(pre);
-            tmpElm.appendChild(dlEl);
-
-            if (this.readonly === false) {
-              var divider = document.createElement("span");
-              divider.className = "bfu-dl-divider";
-              divider.innerHTML = "&nbsp;&nbsp;";
-              tmpElm.appendChild(divider);
-              tmpElm.appendChild(removeEl);
-            }
-
-            this.setInfoText(tmpElm);
-          },
-          fileSelected: function () {},
-          beforeChunkSend: function (formData) {},
-          progressStart: function () {},
-          progressEnd: function () {},
-          uploadComplete: function () {}
-        }
-      },
-      options
-    );
+    var hiddenInput =
+      (options.elements && options.elements.hiddenInput) ||
+      document.querySelector('input[type=hidden][data-bfu-hidden="' + fieldName + '"]');
+    var fileInput =
+      (options.elements && options.elements.fileInput) ||
+      document.querySelector('input[type=file][data-bfu-file="' + fieldName + '"]');
+    var form =
+      (options.elements && options.elements.form) ||
+      (hiddenInput ? hiddenInput.closest("form") : null);
 
     var canSlice =
       (typeof File !== "undefined" && File.prototype && typeof File.prototype.slice === "function") ||
       (typeof Blob !== "undefined" && Blob.prototype && typeof Blob.prototype.slice === "function");
 
-    if (!global.Promise || !global.Blob || !global.FormData || canSlice === false) {
-      this.setInfoText(
-        'Your browser appears to be outdated and does not support the upload mechanism being used. Please upgrade your browser to the latest version or use <a class="bluea" target="_blank" href="https://www.google.com/chrome/">Google Chrome</a> browser for the best experience.'
-      );
-      return;
-    }
+    this.o = {
+      postUrl: options.postUrl !== undefined ? options.postUrl : "/path/to/upload.php",
+      fieldName: fieldName,
+      chunkSizeMB: options.chunkSizeMB !== undefined ? options.chunkSizeMB : 0.98,
+      parallelLimit: options.parallelLimit !== undefined ? options.parallelLimit : 5,
+      maxFullSizeMB: options.maxFullSizeMB !== undefined ? options.maxFullSizeMB : 20,
+      maxRetries: options.maxRetries !== undefined ? options.maxRetries : 3,
+      formData: options.formData,
+      downloadUrl: options.downloadUrl || function (encoded) {
+        return "/files/" + encoded;
+      },
+      beforeUpload: options.beforeUpload,
+      beforeRequest: options.beforeRequest,
+      elements: {
+        form: form,
+        formSubmitBtn: form ? form.querySelector("[type=submit]") : null,
+        fileInput: fileInput,
+        hiddenInput: hiddenInput
+      }
+    };
+
+    this._listeners = {};
+    this._busy = false;
+    this._boundDisableFormSubmit = this._disableFormSubmit.bind(this);
+    this._boundFileInputChange = this._onFileInputChange.bind(this);
+    this._tickProgressDebounce = createThrottledUpdate(this._emitProgress.bind(this), 500);
 
     this.chunkSizeBytes = 1000 * 1000 * this.o.chunkSizeMB;
-
-    var hiddenVal = this.o.elements.hiddenInput ? this.o.elements.hiddenInput.value : "";
-    this.currentFilename = decodeHtmlEntities(hiddenVal);
-
-    var hiddenEl = this.o.elements.hiddenInput;
-    this.readonly = !!(hiddenEl && (hiddenEl.readOnly || hiddenEl.disabled));
-
     this.file = null;
     this.filename = "";
     this.filesize = -1;
@@ -232,22 +172,27 @@
     this.secsLeft = 0;
     this.upSpeedKBps = 0;
     this.upSpeedMbps = 0;
-    this.bfuBarFill = null;
-    this.bfuBarText = null;
-    this._hookProgressActive = false;
-    this._boundDisableFormSubmit = this.disableFormSubmitEvent.bind(this);
-    this._boundFileInputChange = this.onFileInputChange.bind(this);
+    this.currentFilename = "";
+    this.encodedFilename = "";
+    this.currentUrl = "";
 
-    if (this.currentFilename.length === 0) {
-      this.reset();
-    } else {
-      this.setText(this.currentFilename, true);
+    var hiddenEl = this.o.elements.hiddenInput;
+    this.readonly = !!(hiddenEl && (hiddenEl.readOnly || hiddenEl.disabled));
+
+    if (!global.Promise || !global.Blob || !global.FormData || canSlice === false) {
+      this.emit("error", {
+        message:
+          "Your browser appears to be outdated and does not support the upload mechanism being used."
+      });
+      return this;
     }
 
-    this.tickProgressDebounce = createThrottledUpdate(this.tickProgress.bind(this), 500);
+    if (hiddenEl && hiddenEl.value) {
+      this._setFilenameState(decodeHtmlEntities(hiddenEl.value));
+    }
 
-    if (this.o.elements.fileInput) {
-      this.o.elements.fileInput.addEventListener("change", this._boundFileInputChange);
+    if (fileInput) {
+      fileInput.addEventListener("change", this._boundFileInputChange);
     }
 
     return this;
@@ -256,268 +201,77 @@
   BompusFileUpload.SKIP_UPLOAD = SKIP_UPLOAD;
   BompusFileUpload.ABORTED = ABORTED;
 
-  BompusFileUpload.prototype.disableFormSubmitEvent = function (e) {
+  BompusFileUpload.prototype.on = function (type, fn) {
+    if (!this._listeners[type]) {
+      this._listeners[type] = [];
+    }
+    this._listeners[type].push(fn);
+    return this;
+  };
+
+  BompusFileUpload.prototype.off = function (type, fn) {
+    var list = this._listeners[type];
+    if (!list) {
+      return this;
+    }
+    if (!fn) {
+      this._listeners[type] = [];
+      return this;
+    }
+    this._listeners[type] = list.filter(function (item) {
+      return item !== fn;
+    });
+    return this;
+  };
+
+  BompusFileUpload.prototype.emit = function (type, detail) {
+    var list = this._listeners[type];
+    if (!list || list.length === 0) {
+      return;
+    }
+    var copy = list.slice();
+    for (var i = 0; i < copy.length; i++) {
+      copy[i].call(this, detail);
+    }
+  };
+
+  BompusFileUpload.prototype._disableFormSubmit = function (e) {
     e.preventDefault();
     return false;
   };
 
-  BompusFileUpload.prototype.pruneFinishedXhrs = function () {
-    if (!this.xhrs || this.xhrs.length === 0) {
+  BompusFileUpload.prototype._setBusy = function (busy) {
+    if (this._busy === busy) {
       return;
     }
-    this.xhrs = this.xhrs.filter(function (xhr) {
-      return xhr && xhr.readyState !== 4;
-    });
-  };
-
-  BompusFileUpload.prototype.abortPendingUploads = function () {
-    this.abortedGeneration = this.uploadGeneration;
-    if (!this.xhrs || this.xhrs.length === 0) {
-      return;
-    }
-    this.xhrs.forEach(function (xhr) {
-      if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") {
-        xhr.abort();
-      }
-    });
-    this.xhrs = [];
-  };
-
-  BompusFileUpload.prototype.isStaleOrAborted = function (generation) {
-    return generation !== this.uploadGeneration || this.abortedGeneration === generation;
-  };
-
-  BompusFileUpload.prototype.releaseUploadControls = function () {
+    this._busy = busy;
     var fileInput = this.o.elements.fileInput;
     if (fileInput) {
-      fileInput.classList.remove("inProgress");
-    }
-    this.toggleFormSubmit();
-    if (this.readonly !== true && fileInput) {
-      fileInput.disabled = false;
-      setDisplay(fileInput, true);
-      fileInput.value = null;
-    }
-  };
-
-  BompusFileUpload.prototype.resetProgress = function () {
-    this.setInfoText(
-      '<div class="bfu-bar"><div class="bfu-bar-fill"></div><div class="bfu-bar-text">0.0% | 0.00 Mbps | calculating remaining</div></div>'
-    );
-    var info = this.o.elements.infoText;
-    this.bfuBarFill = info ? info.querySelector(".bfu-bar-fill") : null;
-    this.bfuBarText = info ? info.querySelector(".bfu-bar-text") : null;
-  };
-
-  BompusFileUpload.prototype.beginUploadAfterFileSelected = function () {
-    this.filename = this.file ? this.file.name : "";
-    this.filesize = this.file ? this.file.size : 0;
-
-    var dot = this.filename.lastIndexOf(".");
-    var extension = dot === -1 ? "" : this.filename.slice(dot + 1);
-
-    if (!this.file) {
-      return this.setError("File could not be loaded.");
-    }
-    if (this.filename.length === 0) {
-      return this.setError("File name could not be detected.");
-    }
-    if (this.filesize <= 0) {
-      return this.setError("File size could not be detected.");
-    }
-    if (dot === -1 || extension.length === 0 || extension.length > 16 || /^[A-Za-z0-9]+$/.test(extension) === false) {
-      return this.setError("File must end with a type, such as .jpg or .jpeg");
-    }
-
-    var fileInput = this.o.elements.fileInput;
-    if (fileInput) {
-      fileInput.disabled = true;
-      fileInput.classList.add("inProgress");
-    }
-    this.resetProgress();
-    this.toggleFormSubmit();
-    return this.upload_file();
-  };
-
-  BompusFileUpload.prototype.onFileInputChange = function (e) {
-    var self = this;
-
-    e.preventDefault();
-
-    var fileInput = this.o.elements.fileInput;
-    this.file = fileInput && fileInput.files ? fileInput.files[0] : null;
-    this.method = "chunk";
-
-    Promise.resolve(this.o.hooks.fileSelected.call(this))
-      .then(function (result) {
-        if (result === SKIP_UPLOAD) {
-          return;
-        }
-        return self.beginUploadAfterFileSelected();
-      })
-      .catch(function (err) {
-        if (err === ABORTED) {
-          return;
-        }
-        var message = typeof err === "string" ? err : (err && err.message) || "Unknown error.";
-        self.setError(message);
-      });
-
-    return false;
-  };
-
-  BompusFileUpload.prototype.enableUpload = function () {
-    this.releaseUploadControls();
-
-    if (this.readonly === true) {
-      this.setInfoText("No File Uploaded");
-      setDisplay(this.o.elements.fileInput, false);
-      return;
-    }
-
-    this.setInfoText("");
-  };
-
-  BompusFileUpload.prototype.reset = function () {
-    this.enableUpload();
-    if (this.o.elements.hiddenInput) {
-      this.o.elements.hiddenInput.value = "";
-    }
-  };
-
-  BompusFileUpload.prototype.setError = function (message) {
-    this.reset();
-    var err = document.createElement("span");
-    err.className = "bfu-error";
-    err.textContent = "Error: " + String(message);
-    this.setInfoText(err);
-  };
-
-  BompusFileUpload.prototype.setInfoText = function (htmlOrElm) {
-    var info = this.o.elements.infoText;
-    if (!info) {
-      return;
-    }
-
-    if (htmlOrElm === "") {
-      info.replaceChildren();
-      setDisplay(info, false);
-      return;
-    }
-
-    info.replaceChildren();
-    if (typeof htmlOrElm === "string") {
-      info.innerHTML = htmlOrElm;
-    } else if (htmlOrElm && htmlOrElm.jquery) {
-      for (var i = 0; i < htmlOrElm.length; i++) {
-        info.appendChild(htmlOrElm[i]);
-      }
-    } else if (htmlOrElm) {
-      info.appendChild(htmlOrElm);
-    }
-    setDisplay(info, true);
-  };
-
-  BompusFileUpload.prototype.setText = function (filename, fromInit) {
-    var self = this;
-
-    this.currentFilename = filename;
-    this.encodedFilename = encodeURIComponent(this.currentFilename);
-    this.currentUrl = this.o.hooks.getFileDownloadUrl.call(this, this.encodedFilename);
-    this.linkClass = this.o.hooks.getFileDownloadLinkClassName.call(this, this.encodedFilename);
-    if (this.o.elements.hiddenInput) {
-      this.o.elements.hiddenInput.value = this.currentFilename;
-    }
-
-    var dl = document.createElement("a");
-    dl.target = "_blank";
-    dl.className = "bfu-dl " + this.linkClass;
-    dl.href = this.currentUrl;
-    dl.textContent = this.currentFilename;
-
-    var remove = document.createElement("a");
-    remove.target = "_blank";
-    remove.className = "bfu-remove";
-    remove.href = "#";
-    remove.textContent = "Remove";
-    remove.addEventListener("click", function (e) {
-      e.preventDefault();
-      self.reset();
-    });
-
-    this.enableUpload();
-    setDisplay(this.o.elements.fileInput, false);
-
-    this.o.hooks.setText.call(this, fromInit, dl, remove);
-  };
-
-  BompusFileUpload.prototype.tickProgress = function (isComplete) {
-    var percent_done = 0;
-
-    if (isComplete === true) {
-      percent_done = "100";
-      this.tickProgressDebounce.cancel();
-      this.uploadEnded = Date.now();
-      this.uploadDuration = (this.uploadEnded - this.uploadStarted) / 1000;
-      this.uploadDuration = Number(this.uploadDuration.toFixed(2));
-
-      if (this.o.elements.fileInput) {
-        this.o.elements.fileInput.value = null;
-      }
-    } else {
-      var chunkCount = this.chunkProgressPct.length;
-      if (chunkCount === 0) {
-        return;
-      }
-
-      var pctSum = this.chunkProgressPct.reduce(function (a, b) {
-        return a + b;
-      }, 0);
-      percent_done = pctSum / chunkCount;
-      percent_done = Math.min(percent_done, 99.9);
-      percent_done = percent_done.toFixed(1);
-
-      var bytesSum = this.chunkProgressBytes.reduce(function (a, b) {
-        return a + b;
-      }, 0);
-
-      var elapsed = (Date.now() - this.uploadStarted) / 1000;
-      var bps = elapsed ? bytesSum / elapsed : 0;
-
-      this.bytesLeft = Math.max(0, this.filesize - bytesSum);
-      this.upSpeedKBps = Math.ceil(bps / 1024);
-      this.upSpeedMbps = (this.upSpeedKBps / 125).toFixed(2);
-      if (elapsed && bps > 0) {
-        this.secsLeft = Math.max(1, Math.ceil(this.bytesLeft / bps));
+      if (busy) {
+        fileInput.classList.add("inProgress");
+        fileInput.disabled = true;
       } else {
-        this.secsLeft = "calculating";
+        fileInput.classList.remove("inProgress");
+        if (this.readonly !== true) {
+          fileInput.disabled = false;
+        }
       }
     }
-
-    if (this.bfuBarFill) {
-      this.bfuBarFill.style.width = percent_done + "%";
-    }
-    var tmpText = [percent_done + "%", this.upSpeedMbps + " Mbps", this.secsLeft + " seconds remaining"].join(" | ");
-    if (this.bfuBarText) {
-      this.bfuBarText.textContent = tmpText;
-    }
+    this._syncFormSubmit();
+    this.emit(busy ? "busy" : "idle");
   };
 
-  BompusFileUpload.prototype.toggleFormSubmit = function () {
-    var fileInput = this.o.elements.fileInput;
+  BompusFileUpload.prototype._syncFormSubmit = function () {
     var form = this.o.elements.form;
-    var thisInProgress = !!(fileInput && fileInput.classList.contains("inProgress"));
-    var anyInProgress = form
-      ? form.querySelectorAll("input[type=file].inProgress").length > 0
-      : thisInProgress;
-
+    var anyBusy = this._busy;
+    if (form) {
+      anyBusy = form.querySelectorAll("input[type=file].inProgress").length > 0;
+    }
     if (!this.o.elements.formSubmitBtn && form) {
       this.o.elements.formSubmitBtn = form.querySelector("[type=submit]");
     }
-
     var submitBtn = this.o.elements.formSubmitBtn;
-
-    if (anyInProgress) {
+    if (anyBusy) {
       if (form) {
         form.removeEventListener("submit", this._boundDisableFormSubmit);
         form.addEventListener("submit", this._boundDisableFormSubmit);
@@ -533,15 +287,172 @@
         submitBtn.disabled = false;
       }
     }
+  };
 
-    if (thisInProgress === true) {
-      if (this._hookProgressActive !== true) {
-        this._hookProgressActive = true;
-        this.o.hooks.progressStart.call(this);
+  BompusFileUpload.prototype._setFilenameState = function (filename) {
+    this.currentFilename = filename || "";
+    this.encodedFilename = encodeURIComponent(this.currentFilename);
+    this.currentUrl = this.currentFilename
+      ? this.o.downloadUrl.call(this, this.encodedFilename)
+      : "";
+    if (this.o.elements.hiddenInput) {
+      this.o.elements.hiddenInput.value = this.currentFilename;
+    }
+  };
+
+  BompusFileUpload.prototype._emitProgress = function (isComplete) {
+    var pct = 0;
+    var detail;
+
+    if (isComplete === true) {
+      this._tickProgressDebounce.cancel();
+      this.uploadEnded = Date.now();
+      this.uploadDuration = Number(((this.uploadEnded - this.uploadStarted) / 1000).toFixed(2));
+      if (this.o.elements.fileInput) {
+        this.o.elements.fileInput.value = null;
       }
-    } else if (this._hookProgressActive === true) {
-      this._hookProgressActive = false;
-      this.o.hooks.progressEnd.call(this);
+      detail = {
+        pct: 100,
+        mbps: this.upSpeedMbps,
+        secsLeft: 0,
+        complete: true,
+        duration: this.uploadDuration
+      };
+      this.emit("progress", detail);
+      return;
+    }
+
+    var chunkCount = this.chunkProgressPct.length;
+    if (chunkCount === 0) {
+      return;
+    }
+
+    var pctSum = this.chunkProgressPct.reduce(function (a, b) {
+      return a + b;
+    }, 0);
+    pct = Math.min(pctSum / chunkCount, 99.9);
+
+    var bytesSum = this.chunkProgressBytes.reduce(function (a, b) {
+      return a + b;
+    }, 0);
+    var elapsed = (Date.now() - this.uploadStarted) / 1000;
+    var bps = elapsed ? bytesSum / elapsed : 0;
+
+    this.bytesLeft = Math.max(0, this.filesize - bytesSum);
+    this.upSpeedKBps = Math.ceil(bps / 1024);
+    this.upSpeedMbps = (this.upSpeedKBps / 125).toFixed(2);
+    if (elapsed && bps > 0) {
+      this.secsLeft = Math.max(1, Math.ceil(this.bytesLeft / bps));
+    } else {
+      this.secsLeft = "calculating";
+    }
+
+    this.emit("progress", {
+      pct: Number(pct.toFixed(1)),
+      mbps: this.upSpeedMbps,
+      secsLeft: this.secsLeft,
+      complete: false
+    });
+  };
+
+  BompusFileUpload.prototype._validateFile = function () {
+    this.filename = this.file ? this.file.name : "";
+    this.filesize = this.file ? this.file.size : 0;
+    var dot = this.filename.lastIndexOf(".");
+    var extension = dot === -1 ? "" : this.filename.slice(dot + 1);
+
+    if (!this.file) {
+      throw "File could not be loaded.";
+    }
+    if (this.filename.length === 0) {
+      throw "File name could not be detected.";
+    }
+    if (this.filesize <= 0) {
+      throw "File size could not be detected.";
+    }
+    if (dot === -1 || extension.length === 0 || extension.length > 16 || /^[A-Za-z0-9]+$/.test(extension) === false) {
+      throw "File must end with a type, such as .jpg or .jpeg";
+    }
+  };
+
+  BompusFileUpload.prototype._onFileInputChange = async function (e) {
+    e.preventDefault();
+    var fileInput = this.o.elements.fileInput;
+    this.file = fileInput && fileInput.files ? fileInput.files[0] : null;
+    this.method = "chunk";
+
+    try {
+      if (typeof this.o.beforeUpload === "function") {
+        var result = await this.o.beforeUpload.call(this);
+        if (result === SKIP_UPLOAD) {
+          return;
+        }
+      }
+      await this.upload();
+    } catch (err) {
+      if (err === ABORTED) {
+        return;
+      }
+      var message = errMessage(err);
+      this.emit("error", { message: message, error: err });
+    }
+  };
+
+  BompusFileUpload.prototype.pruneFinishedXhrs = function () {
+    if (!this.xhrs || this.xhrs.length === 0) {
+      return;
+    }
+    this.xhrs = this.xhrs.filter(function (xhr) {
+      return xhr && xhr.readyState !== 4;
+    });
+  };
+
+  BompusFileUpload.prototype.abort = function () {
+    this.abortedGeneration = this.uploadGeneration;
+    if (this.xhrs && this.xhrs.length > 0) {
+      this.xhrs.forEach(function (xhr) {
+        if (xhr && xhr.readyState !== 4 && typeof xhr.abort === "function") {
+          xhr.abort();
+        }
+      });
+      this.xhrs = [];
+    }
+    this._setBusy(false);
+  };
+
+  // Back-compat alias used by some callers / docs during migration
+  BompusFileUpload.prototype.abortPendingUploads = function () {
+    this.abort();
+  };
+
+  BompusFileUpload.prototype.isStaleOrAborted = function (generation) {
+    return generation !== this.uploadGeneration || this.abortedGeneration === generation;
+  };
+
+  BompusFileUpload.prototype.reset = function () {
+    this.abort();
+    this.file = null;
+    this.method = "chunk";
+    this._setFilenameState("");
+    if (this.o.elements.fileInput && this.readonly !== true) {
+      this.o.elements.fileInput.value = null;
+    }
+    this._setBusy(false);
+  };
+
+  BompusFileUpload.prototype._mergeFormData = function (formData) {
+    var extra = this.o.formData;
+    if (typeof extra === "function") {
+      extra = extra.call(this);
+    }
+    if (extra && typeof extra === "object") {
+      var keys = Object.keys(extra);
+      for (var i = 0; i < keys.length; i++) {
+        formData.append(keys[i], extra[keys[i]]);
+      }
+    }
+    if (typeof this.o.beforeRequest === "function") {
+      this.o.beforeRequest.call(this, formData);
     }
   };
 
@@ -570,8 +481,7 @@
     formData.append("chunk_action", myAction);
     formData.append("chunk_method", this.method);
     formData.append("retry_num", retryNum);
-
-    this.o.hooks.beforeChunkSend.call(this, formData);
+    this._mergeFormData(formData);
 
     if (myAction === "sendChunk") {
       if (this.method === "chunk") {
@@ -606,7 +516,7 @@
           if (lengthComputable && myAction === "sendChunk") {
             self.chunkProgressBytes[progressIdx] = e.loaded;
             self.chunkProgressPct[progressIdx] = (e.loaded / e.total) * 100;
-            self.tickProgressDebounce(false);
+            self._tickProgressDebounce(false);
           }
         },
         false
@@ -651,8 +561,7 @@
         data = data.data ? data.data : data;
 
         if (success !== true) {
-          var errMessage = data.message ? data.message : "Unknown Error E426.";
-          reject(errMessage);
+          reject(data.message ? data.message : "Unknown Error E426.");
           return;
         }
 
@@ -669,11 +578,11 @@
             if (!lengthComputable) {
               self.chunkProgressBytes[progressIdx] = myChunkByteLen;
               self.chunkProgressPct[progressIdx] = 100;
-              self.tickProgressDebounce(false);
+              self._tickProgressDebounce(false);
             }
             break;
           case "combineChunks":
-            self.tickProgress(true);
+            self._emitProgress(true);
             break;
         }
 
@@ -703,7 +612,13 @@
     });
   };
 
-  BompusFileUpload.prototype.upload_file = async function () {
+  BompusFileUpload.prototype.upload = async function (file) {
+    if (file) {
+      this.file = file;
+    }
+    this.method = this.method || "chunk";
+    this._validateFile();
+
     this.uploadGeneration++;
     var generation = this.uploadGeneration;
 
@@ -713,7 +628,7 @@
 
     if (this.method === "chunk") {
       this.lastChunkNum = Math.max(1, Math.ceil(this.filesize / this.chunkSizeBytes));
-    } else if (this.method === "full") {
+    } else {
       this.lastChunkNum = 1;
     }
 
@@ -722,11 +637,13 @@
       this.chunkProgressBytes[i] = 0;
     }
 
+    this._setBusy(true);
+
     try {
       await this.upload_chunk(0, "initFile", 0);
 
-      if (generation !== this.uploadGeneration) {
-        return;
+      if (this.isStaleOrAborted(generation) === true) {
+        throw ABORTED;
       }
 
       this.uploadStarted = Date.now();
@@ -739,48 +656,278 @@
           return self.upload_chunk(n + 1, "sendChunk", 0);
         },
         function () {
-          self.abortPendingUploads();
+          self.abort();
         }
       );
 
-      if (generation !== this.uploadGeneration) {
-        return;
+      if (this.isStaleOrAborted(generation) === true) {
+        throw ABORTED;
       }
 
       var combineData = await this.upload_chunk(this.lastChunkNum, "combineChunks", 0);
 
-      if (generation !== this.uploadGeneration) {
-        return;
+      if (this.isStaleOrAborted(generation) === true) {
+        throw ABORTED;
       }
 
-      this.setText(combineData.file_name, false);
-      this.o.hooks.uploadComplete.call(this);
+      this._setFilenameState(combineData.file_name);
+      this._setBusy(false);
+
+      var payload = {
+        fileName: combineData.file_name,
+        duration: this.uploadDuration,
+        url: this.currentUrl
+      };
+      this.emit("complete", payload);
+      return payload;
     } catch (err) {
       if (generation !== this.uploadGeneration) {
-        return;
+        throw ABORTED;
       }
 
-      this.abortPendingUploads();
-      this.xhrs = [];
+      if (err !== ABORTED) {
+        this.abort();
+      } else {
+        this._setBusy(false);
+      }
 
       if (err === ABORTED) {
-        this.releaseUploadControls();
         throw err;
       }
 
-      var errStr = typeof err === "string" ? err : (err && err.message) || String(err);
+      var errStr = errMessage(err);
 
-      if (errStr.indexOf("Unknown Error") === -1) {
-        if (this.method === "chunk") {
-          this.method = "full";
-          this.resetProgress();
-          return await this.upload_file();
+      if (errStr.indexOf("Unknown Error") === -1 && this.method === "chunk") {
+        this.method = "full";
+        return await this.upload();
+      }
+
+      this._setBusy(false);
+      this.emit("error", { message: errStr, error: err });
+      throw err;
+    }
+  };
+
+  // Alias
+  BompusFileUpload.prototype.upload_file = function (file) {
+    return this.upload(file);
+  };
+
+  // ---------------------------------------------------------------------------
+  // Default UI adapter
+  // ---------------------------------------------------------------------------
+
+  function setDisplay(el, visible) {
+    if (!el) {
+      return;
+    }
+    el.style.display = visible ? "" : "none";
+  }
+
+  function defaultLinkClass(filename, imageExts) {
+    var ext = (filename.split(".").pop() || "").toLowerCase();
+    for (var i = 0; i < imageExts.length; i++) {
+      if (imageExts[i] === ext) {
+        return "imgLink";
+      }
+    }
+    return "downloadLink";
+  }
+
+  BompusFileUpload.mountDefaultUi = function (uploader, uiOpts) {
+    uiOpts = uiOpts || {};
+    var fieldName = uploader.o.fieldName;
+    var infoText =
+      uiOpts.infoText ||
+      document.querySelector('div[data-bfu-text="' + fieldName + '"]');
+    var linkNewUploads = uiOpts.linkNewUploads === true;
+    var showRemove = uiOpts.showRemove !== false;
+    var imageExts = uiOpts.imageExts || ["jpg", "jpeg", "png", "gif", "webp"];
+    var extraActions = uiOpts.extraActions;
+    var barFill = null;
+    var barText = null;
+    var statusActive = false;
+
+    function clearInfo() {
+      if (!infoText) {
+        return;
+      }
+      infoText.replaceChildren();
+      setDisplay(infoText, false);
+      barFill = null;
+      barText = null;
+    }
+
+    function setInfoNode(nodeOrHtml) {
+      if (!infoText) {
+        return;
+      }
+      infoText.replaceChildren();
+      if (typeof nodeOrHtml === "string") {
+        infoText.innerHTML = nodeOrHtml;
+      } else if (nodeOrHtml) {
+        infoText.appendChild(nodeOrHtml);
+      }
+      setDisplay(infoText, true);
+    }
+
+    function setStatus(nodeOrHtml) {
+      statusActive = true;
+      setInfoNode(nodeOrHtml);
+    }
+
+    function clearStatus() {
+      if (statusActive !== true) {
+        return;
+      }
+      statusActive = false;
+      if (uploader._busy !== true) {
+        renderLabel(true);
+      } else {
+        clearInfo();
+      }
+    }
+
+    function showProgressShell() {
+      statusActive = false;
+      setInfoNode(
+        '<div class="bfu-bar"><div class="bfu-bar-fill"></div><div class="bfu-bar-text">0.0% | 0.00 Mbps | calculating remaining</div></div>'
+      );
+      barFill = infoText ? infoText.querySelector(".bfu-bar-fill") : null;
+      barText = infoText ? infoText.querySelector(".bfu-bar-text") : null;
+    }
+
+    function renderLabel(fromInit) {
+      statusActive = false;
+      var fileInput = uploader.o.elements.fileInput;
+
+      if (!uploader.currentFilename) {
+        if (uploader.readonly === true) {
+          setInfoNode(document.createTextNode("No File Uploaded"));
+          setDisplay(fileInput, false);
+        } else {
+          clearInfo();
+          setDisplay(fileInput, true);
+        }
+        return;
+      }
+
+      var wrap = document.createElement("div");
+      wrap.style.cssFloat = "left";
+      wrap.className = uploader.readonly ? "bfu-dl-readonly" : "bfu-dl-editable";
+
+      var pre = document.createElement("span");
+      pre.className = "bfu-dl-pre";
+      wrap.appendChild(pre);
+
+      var showLink = fromInit === true || linkNewUploads === true;
+      if (showLink === true) {
+        var dl = document.createElement("a");
+        dl.target = "_blank";
+        dl.className = "bfu-dl " + defaultLinkClass(uploader.currentFilename, imageExts);
+        dl.href = uploader.currentUrl;
+        dl.textContent = uploader.currentFilename;
+        wrap.appendChild(dl);
+      } else {
+        var span = document.createElement("span");
+        span.textContent = uploader.currentFilename;
+        wrap.appendChild(span);
+      }
+
+      if (uploader.readonly === false && showRemove === true) {
+        var divider = document.createElement("span");
+        divider.className = "bfu-dl-divider";
+        divider.innerHTML = "&nbsp;&nbsp;";
+        wrap.appendChild(divider);
+
+        var remove = document.createElement("a");
+        remove.target = "_blank";
+        remove.className = "bfu-remove";
+        remove.href = "#";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", function (e) {
+          e.preventDefault();
+          uploader.reset();
+          renderLabel(true);
+        });
+        wrap.appendChild(remove);
+      }
+
+      if (uploader.readonly === false && typeof extraActions === "function") {
+        var actions = extraActions.call(uploader, {
+          fromInit: fromInit === true,
+          filename: uploader.currentFilename,
+          uploader: uploader
+        });
+        if (actions && actions.length) {
+          for (var a = 0; a < actions.length; a++) {
+            if (!actions[a]) {
+              continue;
+            }
+            var d2 = document.createElement("span");
+            d2.className = "bfu-dl-divider";
+            d2.innerHTML = "&nbsp;&nbsp;";
+            wrap.appendChild(d2);
+            wrap.appendChild(actions[a]);
+          }
         }
       }
 
-      this.setError(errStr);
-      throw err;
+      setInfoNode(wrap);
+      setDisplay(fileInput, false);
     }
+
+    uploader.on("busy", function () {
+      if (statusActive !== true) {
+        showProgressShell();
+      }
+    });
+
+    uploader.on("progress", function (detail) {
+      if (!barFill || !barText || statusActive === true) {
+        return;
+      }
+      barFill.style.width = detail.pct + "%";
+      var secs = detail.complete === true ? "0" : detail.secsLeft;
+      barText.textContent = [detail.pct + "%", detail.mbps + " Mbps", secs + " seconds remaining"].join(
+        " | "
+      );
+    });
+
+    uploader.on("idle", function () {
+      // label / error handlers refresh UI; avoid wiping mid-status
+    });
+
+    uploader.on("complete", function () {
+      renderLabel(false);
+    });
+
+    uploader.on("error", function (detail) {
+      var err = document.createElement("span");
+      err.className = "bfu-error";
+      err.textContent = "Error: " + String(detail && detail.message ? detail.message : "Unknown error.");
+      setInfoNode(err);
+      if (uploader.readonly !== true) {
+        setDisplay(uploader.o.elements.fileInput, true);
+        if (uploader.o.elements.fileInput) {
+          uploader.o.elements.fileInput.value = null;
+        }
+      }
+    });
+
+    // Initial paint
+    if (uploader.currentFilename) {
+      renderLabel(true);
+    } else if (uploader.readonly === true) {
+      renderLabel(true);
+    }
+
+    return {
+      setStatus: setStatus,
+      clearStatus: clearStatus,
+      renderLabel: renderLabel,
+      clearInfo: clearInfo
+    };
   };
 
   global.BompusFileUpload = BompusFileUpload;

@@ -1,6 +1,6 @@
 <?php
 /*!
- * Bompus Chunked File Upload v2.0.0
+ * Bompus Chunked File Upload v2.1.0
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * Library: vanilla JS (no jQuery). This demo page loads jQuery only for croppie/featherlight.
@@ -15,7 +15,7 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
 	<head>
 		<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
-		<title>Bompus File Upload - Example</title>
+		<title>Bompus Chunked File Upload 2.1 - Example</title>
 		<meta name="viewport" content="width=device-width,initial-scale=1.0" />
 
 		<link rel="stylesheet" href="./bompus-chunked-file-upload.css?v=<?php echo time(); ?>" />
@@ -109,21 +109,21 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 				return '/files/' + this.o.fieldName + '/' + uriEncodedFilename;
 			};
 			
-			var myProgressStart = function() {
-				if ($("#submitdiv #major-publishing-actions .inProgressPub").length === 0) {
-					$("#submitdiv #major-publishing-actions").prepend(
-						"<div class='inProgressPub'>A file upload is in progress. Please wait for it to complete before clicking SAVE.</div><br />"
-					);
-				}
-			};
-
-			var myProgressEnd = function() {
-				$("#submitdiv #major-publishing-actions .inProgressPub").remove();
-			};
-
-			var myUploadComplete = function() {
-				console.log("upload duration", this.uploadDuration, "seconds");
-				$.featherlight.close();
+			var bindBusyUi = function(up) {
+				up.on("busy", function() {
+					if ($("#submitdiv #major-publishing-actions .inProgressPub").length === 0) {
+						$("#submitdiv #major-publishing-actions").prepend(
+							"<div class='inProgressPub'>A file upload is in progress. Please wait for it to complete before clicking SAVE.</div><br />"
+						);
+					}
+				});
+				up.on("idle", function() {
+					$("#submitdiv #major-publishing-actions .inProgressPub").remove();
+				});
+				up.on("complete", function(p) {
+					console.log("upload duration", p.duration, "seconds");
+					$.featherlight.close();
+				});
 			};
 		</script>
 		<!-- END: EXAMPLE PAGE STYLES, NOT NEEDED FOR PLUGIN USAGE -->
@@ -138,7 +138,7 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 	</head>
 	<body>
 		<div class='container'>
-			<h3 style='margin:0;margin-bottom:15px;'>Bompus Chunked File Upload - v2.0.0 - <a target='_blank' href='https://github.com/bompus/bompus-chunked-file-upload'>GitHub</a></h3>
+			<h3 style='margin:0;margin-bottom:15px;'>Bompus Chunked File Upload - v2.1.0 - <a target='_blank' href='https://github.com/bompus/bompus-chunked-file-upload'>GitHub</a></h3>
 			<form action='#' method='get' onsubmit='alert("Form Submitted. Not really though, this does not actually submit anywhere."); return false;'>
 				
 			<div class='example'>
@@ -158,18 +158,15 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 							var upload_1 = BompusFileUpload({
 								postUrl: '/upload.php',
 								fieldName: fieldName,
-								hooks: {
-									getFileDownloadUrl: myGetFileDownloadUrl,
-									beforeChunkSend: function(formData) {
-										formData.append('action', 'dls_admin_ajax_upload');
-										formData.append('post', '<?php echo $postId; ?>');
-										formData.append('meta', '<?php echo $name; ?>');
-									},
-									progressStart: myProgressStart,
-									progressEnd: myProgressEnd,
-									uploadComplete: myUploadComplete
-								}
+								formData: {
+									action: 'dls_admin_ajax_upload',
+									post: '<?php echo $postId; ?>',
+									meta: '<?php echo $name; ?>'
+								},
+								downloadUrl: myGetFileDownloadUrl
 							});
+							BompusFileUpload.mountDefaultUi(upload_1, { linkNewUploads: true });
+							bindBusyUi(upload_1);
 						})();
 					</script>
 				</div>
@@ -211,133 +208,103 @@ header('X-Robots-Tag: noindex, noarchive, nofollow, noimageindex');
 							var upload_2 = BompusFileUpload({
 								postUrl: '/upload.php',
 								fieldName: fieldName,
-								hooks: {
-									getFileDownloadUrl: myGetFileDownloadUrl,
-									setText: function(fromInit, dlEl, removeEl) {
-										$('#' + fieldName + '-img').attr('src', this.currentUrl);
-									},
-									fileSelected: function() {
-										var self = this;
-										return new Promise(function(resolve, reject) {
-											var clickedSave = false;
-											var settled = false;
-											var objUrlSrc = URL.createObjectURL(self.file);
-											var popupContents = $('#' + fieldName + '-popup');
+								formData: {
+									action: 'dls_admin_ajax_upload',
+									post: '<?php echo $postId; ?>',
+									meta: '<?php echo $name; ?>'
+								},
+								downloadUrl: myGetFileDownloadUrl,
+								beforeUpload: async function() {
+									var self = this;
+									return new Promise(function(resolve, reject) {
+										var clickedSave = false;
+										var settled = false;
+										var objUrlSrc = URL.createObjectURL(self.file);
+										var popupContents = $('#' + fieldName + '-popup');
 
-											var cropDiv = $('<div />');
-											var content = $('<div />');
+										var cropDiv = $('<div />');
+										var content = $('<div />');
 
-											var settle = function(value, isReject) {
-												if (settled) {
-													return;
+										var settle = function(value, isReject) {
+											if (settled) { return; }
+											settled = true;
+											if (isReject === true) { reject(value); }
+											else { resolve(value); }
+										};
+
+										var disableCropper = function() {
+											content.find('input, button').prop('disabled', true);
+											content.find('.cr-slider, .cropBtns').hide();
+											var oldCanvas = cropDiv.find('canvas').get(0);
+											if (oldCanvas) {
+												var newClone = cropDiv.clone();
+												var context = newClone.find('canvas').get(0).getContext('2d');
+												context.drawImage(oldCanvas, 0, 0);
+												cropDiv.replaceWith(newClone);
+											}
+										};
+
+										var caughtErr = function(e) {
+											disableCropper();
+											cropDiv.hide();
+											console.log('croppie caught error', e);
+											settle('Unable to read image. Please try a different image.', true);
+										};
+
+										var uploadCroppedBlob = function(blob) {
+											blob.name = self.file.name.substr(0, self.file.name.lastIndexOf(".")) + ".png";
+											self.file = blob;
+											var tmpUrlSrc = URL.createObjectURL(self.file);
+											$('#' + fieldName + '-img').attr('src', tmpUrlSrc);
+											setTimeout(function() { URL.revokeObjectURL(tmpUrlSrc); }, 0);
+											clickedSave = true;
+											disableCropper();
+											settle();
+										};
+
+										$.featherlight(popupContents, {
+											closeOnClick: false,
+											afterOpen: function() {
+												var flSelf = this;
+												content = flSelf.$content;
+												content.parents(".featherlight").addClass("cropper").find("> .featherlight-content").css({ "max-width": "90vw", "max-height": "90vh" });
+												content.parent().prepend("<div style='position:absolute;top:0;left:0;height:25px;padding:4px 10px 0px 10px;background:#ffee58;color:#000;width:100%;'>Crop Image</div>");
+												cropDiv = content.show().find('.cropDiv');
+												var allowedExts = ["jpg", "jpeg", "png", "gif", "webp"];
+												var re = /(?:\.([^.]+))?$/;
+												var ext = re.exec(self.file.name)[1];
+												if (allowedExts.indexOf(ext) === -1) {
+													return caughtErr("File extension '" + ext + "' not supported");
 												}
-												settled = true;
-												if (isReject === true) {
-													reject(value);
-												} else {
-													resolve(value);
-												}
-											};
-
-											var disableCropper = function() {
-												content.find('input, button').prop('disabled', true);
-												content.find('.cr-slider, .cropBtns').hide();
-												
-												// remove all event listeners, but we have to redraw the canvas
-												var oldCanvas = cropDiv.find('canvas').get(0);
-												if (oldCanvas) {
-													var newClone = cropDiv.clone();
-													var context = newClone.find('canvas').get(0).getContext('2d');
-													context.drawImage(oldCanvas, 0, 0);
-													cropDiv.replaceWith(newClone);
-												}
-											};
-
-											var caughtErr = function(e) {
-												disableCropper();
-												cropDiv.hide();
-												console.log('croppie caught error', e);
-												settle('Unable to read image. Please try a different image.', true);
-											};
-
-											var uploadCroppedBlob = function(blob) {
-													// add .name to blob object, and convert file extension to PNG
-													blob.name = self.file.name.substr(0, self.file.name.lastIndexOf(".")) + ".png";
-													self.file = blob;
-
-													// show the image immediately to reduce display blip during server load
-													var tmpUrlSrc = URL.createObjectURL(self.file);
-													$('#' + fieldName + '-img').attr('src', tmpUrlSrc);
-													setTimeout(function() {
-														URL.revokeObjectURL(tmpUrlSrc);
-													}, 0);
-
-													clickedSave = true;
-
-													disableCropper();
-													settle();
-											};
-
-											$.featherlight(popupContents, {
-												closeOnClick: false,
-												afterOpen: function() {
-													var flSelf = this;
-
-													content = flSelf.$content;
-													content.parents(".featherlight").addClass("cropper").find("> .featherlight-content").css({ "max-width": "90vw", "max-height": "90vh" });
-													content.parent().prepend("<div style='position:absolute;top:0;left:0;height:25px;padding:4px 10px 0px 10px;background:#ffee58;color:#000;width:100%;'>Crop Image</div>");
-
-													self.o.elements.infoText = document.querySelector('div[data-bfu-text="<?php echo $name; ?>"]');
-													
-													cropDiv = content.show().find('.cropDiv');
-
-													var allowedExts = ["jpg", "jpeg", "png", "gif", "webp"];
-													var re = /(?:\.([^.]+))?$/;
-													var ext = re.exec(self.file.name)[1];
-													if (allowedExts.indexOf(ext) === -1) {
-														return caughtErr("File extension '" + ext + "' not supported");
-													}
-													
-													cropDiv.croppie({
-														enableOrientation: true,
-														viewport: { width: 115, height: 130 }
+												cropDiv.croppie({ enableOrientation: true, viewport: { width: 115, height: 130 } });
+												cropDiv.croppie('bind', { url: objUrlSrc }).then(function() {
+													content.find('#btnRotate').on('click', function() { cropDiv.croppie('rotate', 90); });
+													content.find('#btnCrop').on('click', function() {
+														cropDiv.croppie('result', { type: 'blob', size: 'original', format: 'png', quality: 1, circle: false }).then(uploadCroppedBlob).catch(caughtErr);
 													});
-
-													cropDiv.croppie('bind', { url: objUrlSrc }).then(function() {
-														content.find('#btnRotate').on('click', function() {
-															cropDiv.croppie('rotate', 90);
-														});
-
-														content.find('#btnCrop').on('click', function() {
-															cropDiv.croppie('result', { type: 'blob', size: 'original', format: 'png', quality: 1, circle: false }).then(uploadCroppedBlob).catch(caughtErr);
-														});
-
-														content.find('.cropBtns').show();
-													}).catch(caughtErr);
-												},
-												afterClose: function() {
-													// free up memory
-													URL.revokeObjectURL(objUrlSrc);
-
-													if (clickedSave === false) {
-														// we need to reset the uploader, or else the file input change event may not fire again
-														self.reset();
-														settle(BompusFileUpload.SKIP_UPLOAD);
-													}
+													content.find('.cropBtns').show();
+												}).catch(caughtErr);
+											},
+											afterClose: function() {
+												URL.revokeObjectURL(objUrlSrc);
+												if (clickedSave === false) {
+													self.reset();
+													settle(BompusFileUpload.SKIP_UPLOAD);
 												}
-											});
+											}
 										});
-									},
-									beforeChunkSend: function(formData) {
-										formData.append('action', 'dls_admin_ajax_upload');
-										formData.append('post', '<?php echo $postId; ?>');
-										formData.append('meta', '<?php echo $name; ?>');
-									},
-									progressStart: myProgressStart,
-									progressEnd: myProgressEnd,
-									uploadComplete: myUploadComplete
+									});
 								}
 							});
+							upload_2.on("complete", function() {
+								$('#' + fieldName + '-img').attr('src', upload_2.currentUrl);
+							});
+							var ui2 = BompusFileUpload.mountDefaultUi(upload_2, {
+								infoText: document.querySelector('div[data-bfu-text="<?php echo $name; ?>"]'),
+								linkNewUploads: true,
+								showRemove: false
+							});
+							bindBusyUi(upload_2);
 						})(jQuery);
 					</script>
 				</div>
