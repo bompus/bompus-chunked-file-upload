@@ -1,5 +1,5 @@
 /*!
- * Bompus Chunked File Upload v3.0.2
+ * Bompus Chunked File Upload v3.0.3
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * Headless chunked upload engine + optional mountDefaultUi (same file for CDN).
@@ -254,6 +254,7 @@
     this.encodedFilename = "";
     this.currentUrl = "";
     this.ui = null;
+    this._uploadFormData = null;
     this.unsupported = null;
 
     var hiddenEl = this.o.elements.hiddenInput;
@@ -644,6 +645,7 @@
     this.abortedGeneration = this.uploadGeneration;
     this._abortXhrsOnly();
     this._setBusy(false);
+    this.clearUploadFormData();
   };
 
   BompusFileUpload.prototype._isStaleOrAborted = function (generation) {
@@ -662,6 +664,7 @@
     this._abortXhrsOnly();
     this._tickProgressDebounce.cancel();
     this._setBusy(false);
+    this.clearUploadFormData();
     if (err === TIMEOUT) {
       this._emitError(TIMEOUT);
     } else if (err !== ABORTED) {
@@ -697,6 +700,24 @@
     }
   };
 
+  /** Session fields for the current upload (merged every request after static formData). */
+  BompusFileUpload.prototype.setUploadFormData = function (obj) {
+    if (obj === null || obj === undefined) {
+      this._uploadFormData = null;
+      return this;
+    }
+    if (typeof obj !== "object") {
+      return this;
+    }
+    this._uploadFormData = Object.assign({}, obj);
+    return this;
+  };
+
+  BompusFileUpload.prototype.clearUploadFormData = function () {
+    this._uploadFormData = null;
+    return this;
+  };
+
   BompusFileUpload.prototype._mergeFormData = function (formData) {
     var extra = this.o.formData;
     if (typeof extra === "function") {
@@ -706,6 +727,13 @@
       var keys = Object.keys(extra);
       for (var i = 0; i < keys.length; i++) {
         formData.append(keys[i], extra[keys[i]]);
+      }
+    }
+    var session = this._uploadFormData;
+    if (session && typeof session === "object") {
+      var sessionKeys = Object.keys(session);
+      for (var s = 0; s < sessionKeys.length; s++) {
+        formData.append(sessionKeys[s], session[sessionKeys[s]]);
       }
     }
     if (typeof this.o.beforeRequest === "function") {
@@ -884,6 +912,7 @@
     this._clearUploadTimeout();
     this._setFilenameState(fileName);
     this._setBusy(false);
+    this.clearUploadFormData();
     var payload = {
       fileName: fileName,
       duration: this.uploadDuration,
@@ -1059,6 +1088,7 @@
     var showRemove = uiOpts.showRemove !== false;
     var imageExts = uiOpts.imageExts || DEFAULT_IMAGE_EXTS.slice();
     var extraActions = uiOpts.extraActions;
+    var extraActionsBeforeRemove = uiOpts.extraActionsBeforeRemove === true;
     var barFill = null;
     var barText = null;
     var statusActive = false;
@@ -1145,12 +1175,39 @@
         wrap.appendChild(span);
       }
 
-      if (uploader.readonly === false && showRemove === true) {
+      function appendDivider() {
         var divider = document.createElement("span");
         divider.className = "bfu-dl-divider";
         divider.innerHTML = "&nbsp;&nbsp;";
         wrap.appendChild(divider);
+      }
 
+      function appendExtraActions() {
+        if (uploader.readonly === true || typeof extraActions !== "function") {
+          return;
+        }
+        var actions = extraActions.call(uploader, {
+          fromInit: fromInit === true,
+          filename: uploader.currentFilename,
+          uploader: uploader
+        });
+        if (!actions || actions.length === 0) {
+          return;
+        }
+        for (var a = 0; a < actions.length; a++) {
+          if (!actions[a]) {
+            continue;
+          }
+          appendDivider();
+          wrap.appendChild(actions[a]);
+        }
+      }
+
+      function appendRemove() {
+        if (uploader.readonly === true || showRemove !== true) {
+          return;
+        }
+        appendDivider();
         var remove = document.createElement("a");
         remove.className = "bfu-remove";
         remove.href = "#";
@@ -1163,24 +1220,12 @@
         wrap.appendChild(remove);
       }
 
-      if (uploader.readonly === false && typeof extraActions === "function") {
-        var actions = extraActions.call(uploader, {
-          fromInit: fromInit === true,
-          filename: uploader.currentFilename,
-          uploader: uploader
-        });
-        if (actions && actions.length) {
-          for (var a = 0; a < actions.length; a++) {
-            if (!actions[a]) {
-              continue;
-            }
-            var d2 = document.createElement("span");
-            d2.className = "bfu-dl-divider";
-            d2.innerHTML = "&nbsp;&nbsp;";
-            wrap.appendChild(d2);
-            wrap.appendChild(actions[a]);
-          }
-        }
+      if (extraActionsBeforeRemove === true) {
+        appendExtraActions();
+        appendRemove();
+      } else {
+        appendRemove();
+        appendExtraActions();
       }
 
       setInfoNode(wrap);

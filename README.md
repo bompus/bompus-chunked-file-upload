@@ -4,7 +4,7 @@ Parallel chunked file uploads. **Vanilla JS — zero dependencies.**
 
 **v3.0:** headless engine + optional `mountDefaultUi`, form busy tracking, `el.bfu` registry.
 
-Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@3.0.2`**.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@3.0.3`**.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -14,9 +14,9 @@ Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR uplo
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/bompus-chunked-file-upload.min.js  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/no-photo.png
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.js  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/no-photo.png
 
 ## Quick start
 
@@ -28,8 +28,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.js"></script>
 <script>
   var form = document.getElementById("post");
   var up = BompusFileUpload({
@@ -54,7 +54,7 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/no-photo.png
 | `formData` | — | Object or `() => object` merged into every request |
 | `downloadUrl` | `(enc) => "/files/"+enc` | Build download URL |
 | `beforeUpload` | — | async; `SKIP_UPLOAD` / throw / proceed |
-| `beforeRequest` | — | `(formData) => void` after merge |
+| `beforeRequest` | — | `(formData) => void` after static + session merge; runs **per request** — do not clear session flags on first call |
 | `chunkSizeMB` | `0.98` | Decimal MB (`1_000_000` bytes) |
 | `parallelLimit` | `5` | Max concurrent chunk POSTs |
 | `maxFullSizeMB` | `20` | Full-POST fallback max (decimal MB) |
@@ -77,6 +77,7 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.2/no-photo.png
   - Other failures: reject **and** one `error` event
   - Overlap while busy: reject with message + `error` event
 - `up.abort()`, `up.reset()`, `up.clearPendingSelection()`, `up.setReadonly(bool)`, `up.syncFileInputEnabled()`
+- `up.setUploadFormData(obj | null)` / `up.clearUploadFormData()` — session fields for the current upload (every chunk request; auto-cleared on complete / abort / reset / failed end)
 - `up.unsupported` — string if browser APIs missing (no construct-time event)
 - Registry: `hiddenInput.bfu` / `fileInput.bfu` → uploader instance
 - Sentinels: `SKIP_UPLOAD`, `ABORTED`, `TIMEOUT`, `TRANSPORT_ERROR` (identity `===` only; `.name` for debug)
@@ -92,6 +93,7 @@ var ui = BompusFileUpload.mountDefaultUi(up, {
   linkNewUploads: false,
   imageExts: BompusFileUpload.DEFAULT_IMAGE_EXTS.slice(),
   extraActions: function (ctx) { return []; },
+  extraActionsBeforeRemove: false,
   showRemove: true
 });
 // also available as up.ui

@@ -1,5 +1,16 @@
 # Changelog
 
+## [3.0.3] — 2026-08-06
+
+### Added
+
+- **`extraActionsBeforeRemove`** (`mountDefaultUi`, default `false`) — when `true`, paint `extraActions` before the Remove link (`filename … [extras] … Remove`)
+- **`up.setUploadFormData(obj | null)`** / **`up.clearUploadFormData()`** — session fields merged into every chunk request after static `formData` and before `beforeRequest`; cleared on complete / abort / reset / failed upload end
+
+### Docs
+
+- `beforeRequest` runs **per request** — do not clear one-shot session flags on the first call; use `setUploadFormData` for values that must ride every chunk (`initFile` / `sendChunk` / `combineChunks`)
+
 ## [3.0.2] — 2026-08-06
 
 ### Added
@@ -51,8 +62,8 @@
 
 ## [2.1.0] — 2026-08-06
 
-Headless engine + optional `mountDefaultUi`. Prefer **3.0.2**.
+Headless engine + optional `mountDefaultUi`. Prefer **3.0.3**.
 
 ## [2.0.0] — 2026-08-06
 
-Vanilla port (historical). Prefer **3.0.2**.
+Vanilla port (historical). Prefer **3.0.3**.
