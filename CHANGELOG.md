@@ -1,5 +1,11 @@
 # Changelog
 
+## [3.0.2] — 2026-08-06
+
+### Added
+
+- **`up.syncFileInputEnabled()`** — public re-apply of file-input enabled policy (`readonly || busy || beforeUpload lock`) after external disable
+
 ## [3.0.1] — 2026-08-06
 
 ### Added
@@ -45,8 +51,8 @@
 
 ## [2.1.0] — 2026-08-06
 
-Headless engine + optional `mountDefaultUi`. Prefer **3.0.1**.
+Headless engine + optional `mountDefaultUi`. Prefer **3.0.2**.
 
 ## [2.0.0] — 2026-08-06
 
-Vanilla port (historical). Prefer **3.0.1**.
+Vanilla port (historical). Prefer **3.0.2**.

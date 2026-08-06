@@ -1,5 +1,5 @@
 /*!
- * Bompus Chunked File Upload v3.0.1
+ * Bompus Chunked File Upload v3.0.2
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * Headless chunked upload engine + optional mountDefaultUi (same file for CDN).
@@ -403,6 +403,11 @@
     }
     fileInput.disabled =
       this.readonly === true || this._busy === true || this._inputLocked === true;
+  };
+
+  /** Public: re-apply file-input enabled policy after external disable/enable. */
+  BompusFileUpload.prototype.syncFileInputEnabled = function () {
+    this._syncFileInputEnabled();
   };
 
   /** Lock file input during beforeUpload; also holds form busy (not transfer _busy). */
