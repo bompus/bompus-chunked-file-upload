@@ -1,5 +1,5 @@
 /*!
- * Bompus Chunked File Upload v4.1.0
+ * Bompus Chunked File Upload v4.1.1
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * UI-first mount + sequential chunked upload (initFile / sendChunk / combineChunks).

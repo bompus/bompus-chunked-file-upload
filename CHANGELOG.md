@@ -1,5 +1,9 @@
 # Changelog
 
+## [4.1.1] — 2026-08-07
+
+- Removed obsolete `index.php` demo (stale v3 API). Use `example.html`.
+
 ## [4.1.0] — 2026-08-07
 
 ### Breaking

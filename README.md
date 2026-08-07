@@ -4,7 +4,7 @@ Sequential chunked file uploads. **Vanilla JS — zero dependencies.**
 
 **v4.0:** UI-first `mount`, **no auto-upload** on file pick, `upload(file, { data })`, form busy helpers, `decorateLabel`. Wire protocol remains `initFile` → `sendChunk`(s) → `combineChunks`.
 
-Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.1.0`**.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.1.1`**.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -14,9 +14,9 @@ Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR uplo
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.js  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/no-photo.png
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.1/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.1/bompus-chunked-file-upload.min.js  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.1/no-photo.png
 
 ## Quick start
 
@@ -28,8 +28,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.1/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.1/bompus-chunked-file-upload.min.js"></script>
 <script>
   var form = document.getElementById("post");
   var fileInput = document.querySelector('[data-bfu-file="upload-1"]');
