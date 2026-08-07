@@ -1,5 +1,5 @@
 /*!
- * Bompus Chunked File Upload v4.0.0
+ * Bompus Chunked File Upload v4.0.1
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * UI-first mount + sequential chunked upload (initFile / sendChunk / combineChunks).
@@ -304,7 +304,6 @@
       },
       _listeners: {},
       _busy: false,
-      _inputLocked: false,
       _timedOut: false,
       _uploadTimeoutId: null,
       _uploadData: null,
@@ -447,8 +446,7 @@
     if (!fileInput) {
       return;
     }
-    fileInput.disabled =
-      self.readonly === true || self._busy === true || self._inputLocked === true;
+    fileInput.disabled = self.readonly === true || self._busy === true;
   }
 
   function setBusy(self, busy) {

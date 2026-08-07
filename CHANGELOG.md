@@ -1,5 +1,9 @@
 # Changelog
 
+## [4.0.1] — 2026-08-07
+
+- Removed unused `_inputLocked`; file input enablement is `readonly || busy` only
+
 ## [4.0.0] — 2026-08-07
 
 ### Breaking
