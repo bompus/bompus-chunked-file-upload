@@ -1,69 +1,27 @@
 # Changelog
 
-## [3.0.3] — 2026-08-06
-
-### Added
-
-- **`extraActionsBeforeRemove`** (`mountDefaultUi`, default `false`) — when `true`, paint `extraActions` before the Remove link (`filename … [extras] … Remove`)
-- **`up.setUploadFormData(obj | null)`** / **`up.clearUploadFormData()`** — session fields merged into every chunk request after static `formData` and before `beforeRequest`; cleared on complete / abort / reset / failed upload end
-
-### Docs
-
-- `beforeRequest` runs **per request** — do not clear one-shot session flags on the first call; use `setUploadFormData` for values that must ride every chunk (`initFile` / `sendChunk` / `combineChunks`)
-
-## [3.0.2] — 2026-08-06
-
-### Added
-
-- **`up.syncFileInputEnabled()`** — public re-apply of file-input enabled policy (`readonly || busy || beforeUpload lock`) after external disable
-
-## [3.0.1] — 2026-08-06
-
-### Added
-
-- **`BompusFileUpload.holdFormBusy(form)`** — bump form busy (submit blocked + `trackFormBusy`) outside transfer `_busy`; returns idempotent `release()`
-- Form busy during **`beforeUpload` / file-input lock** (not only during upload transfer)
-
-### Fixed
-
-- SAVE / submit could run during long `beforeUpload` (e.g. image editor) because `_inputLocked` did not affect `formBusyCount`
-- Proceed handoff into `upload()` keeps form busy without a gap and without double-counting
-
-## [3.0.0] — 2026-08-06
+## [4.0.0] — 2026-08-07
 
 ### Breaking
 
-- Registry is **`el.bfu`** only (no `upload_1` / `upload_2` properties).
-- Form busy via WeakMap: **`trackFormBusy(form, { onChange })`** once per form + **`formBusyCount(form)`** (no `.inProgress` sniff / per-field counters).
-- Dropped `upload_file` / `abortPendingUploads`; chunk helpers are private.
-- Sentinels are identity objects (`SKIP_UPLOAD`, `ABORTED`, **`TIMEOUT`**, **`TRANSPORT_ERROR`**) — compare with `===`.
-- `mountDefaultUi` sets **`uploader.ui`** and always paints empty idle (enables file input).
-- Zero-dependency package (vanilla JS only; no jQuery/Croppie/Featherlight in the library).
+- **No auto-upload** on `<input type=file> change`. Call `upload(file)` or `BompusFileUpload.bindInput(input, onPick)`.
+- **`BompusFileUpload.mount(options)`** is the public entry (UI always mounted). Constructor throws. Removed `mountDefaultUi`, `beforeUpload`, `SKIP_UPLOAD`, `parallelLimit`, `setUploadFormData` / `clearUploadFormData`, `beforeRequest`.
+- Per-upload session fields: `upload(file, { data })` (merged on every request including `combineChunks`).
+- Prefer explicit `elements: { fileInput, hiddenInput, infoText }` — no page-wide `fieldName` scavenger. Optional root Element scopes `data-bfu-*` lookup.
 
 ### Added
 
-- `setReadonly(flag)`, `clearPendingSelection()`
-- `upload(file?, { timeoutMs })` → reject `TIMEOUT` (one `error` emit; form stays busy until settle)
-- `DEFAULT_IMAGE_EXTS` includes **avif**; `isImageExt(ext, exts?)`
-- `up.unsupported` when browser APIs are missing
-- `up.isBusy()`
+- `BompusFileUpload.bindInput(input, onPick)` — pick helper with no upload semantics
+- `decorateLabel(labelRoot, ctx)` mount option (replace `extraActions` / `extraActionsBeforeRemove`)
+- `change` event when the hidden filename is set or cleared
+- `maxFileMB` (rejects oversized files; `maxFullSizeMB` alias)
 
-### Fixed
+### Changed
 
-- Reliable `error` emit for `beforeUpload` / validation (no silent file-input failures; no double-emit)
-- Full-size fallback is in-attempt (no recursive `upload()` / timeout poison)
-- Overlapping `upload()` while busy rejected with one `error`
-- `mountDefaultUi` idempotent; `trackFormBusy` dedupes the same `onChange`
-- `fieldName` escaped for `querySelector`
-- `maxFullSizeMB` uses decimal MB (aligned with `chunkSizeMB`)
-- Full-size fallback only on `TRANSPORT_ERROR` (not server / app messages)
-- Pending chunk retries cancelled on abort / fail-fast / settle
-- File input disabled during `beforeUpload` (no overlapping picks)
+- Chunk sends are **sequential** only (init → send×N → combine); transport full-fallback still uses the same 3-step protocol
+- Form busy during **transfer** automatically; use `holdFormBusy` for preprocess dialogs
+- Kept: `trackFormBusy`, `formBusyCount`, `holdFormBusy`, `el.bfu` registry, `.bfu-*` CSS classes, identity `ABORTED` / `TIMEOUT` / `TRANSPORT_ERROR` for reject handling
 
-## [2.1.0] — 2026-08-06
+## [3.0.3] — 2026-08-06
 
-Headless engine + optional `mountDefaultUi`. Prefer **3.0.3**.
-
-## [2.0.0] — 2026-08-06
-
-Vanilla port (historical). Prefer **3.0.3**.
+- Session `setUploadFormData` / `extraActionsBeforeRemove` (superseded by 4.0)

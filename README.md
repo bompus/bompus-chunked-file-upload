@@ -1,10 +1,10 @@
 # bompus-chunked-file-upload
 
-Parallel chunked file uploads. **Vanilla JS — zero dependencies.**
+Sequential chunked file uploads. **Vanilla JS — zero dependencies.**
 
-**v3.0:** headless engine + optional `mountDefaultUi`, form busy tracking, `el.bfu` registry.
+**v4.0:** UI-first `mount`, **no auto-upload** on file pick, `upload(file, { data })`, form busy helpers, `decorateLabel`. Wire protocol remains `initFile` → `sendChunk`(s) → `combineChunks`.
 
-Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@3.0.3`**.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.0.0`**.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -14,9 +14,9 @@ Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR uplo
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.js  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/no-photo.png
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.0/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.0/bompus-chunked-file-upload.min.js  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.0/no-photo.png
 
 ## Quick start
 
@@ -28,94 +28,88 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@3.0.3/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.0/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.0/bompus-chunked-file-upload.min.js"></script>
 <script>
   var form = document.getElementById("post");
-  var up = BompusFileUpload({
-    postUrl: "/upload.php",
-    fieldName: "upload-1",
-    formData: { meta: "upload-1" },
-    downloadUrl: function (encoded) { return "/files/" + encoded; }
+  var fileInput = document.querySelector('[data-bfu-file="upload-1"]');
+  var field = BompusFileUpload.mount({
+    url: "/upload.php",
+    data: { meta: "upload-1" },
+    elements: {
+      infoText: document.querySelector('[data-bfu-text="upload-1"]'),
+      fileInput: fileInput,
+      hiddenInput: document.querySelector('[data-bfu-hidden="upload-1"]')
+    },
+    downloadUrl: function (encoded) { return "/files/" + encoded; },
+    linkNewUploads: true
   });
-  BompusFileUpload.mountDefaultUi(up, { linkNewUploads: true });
+  BompusFileUpload.bindInput(fileInput, function (file) {
+    return field.upload(file);
+  });
   BompusFileUpload.trackFormBusy(form, {
     onChange: function (count) { /* show notice when count > 0 */ }
   });
 </script>
 ```
 
-## Engine options
+## Mount options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `postUrl` | `"/path/to/upload.php"` | Upload endpoint |
-| `fieldName` | `"bompus-file-1"` | Resolves `data-bfu-*` (CSS.escape used) |
-| `formData` | — | Object or `() => object` merged into every request |
+| `url` / `postUrl` | `"/path/to/upload.php"` | Upload endpoint |
+| `data` / `formData` | — | Object or `() => object` merged into every request |
+| `elements` | — | `{ fileInput, hiddenInput, infoText?, form? }` (preferred) |
 | `downloadUrl` | `(enc) => "/files/"+enc` | Build download URL |
-| `beforeUpload` | — | async; `SKIP_UPLOAD` / throw / proceed |
-| `beforeRequest` | — | `(formData) => void` after static + session merge; runs **per request** — do not clear session flags on first call |
+| `decorateLabel` | — | `(labelRoot, ctx) => HTMLElement[]?` — mutate label and/or return action nodes (before Remove) |
+| `showRemove` | `true` | Show Remove control |
+| `linkNewUploads` | `false` | Link newly uploaded filenames (existing values always link) |
+| `imageExts` | `DEFAULT_IMAGE_EXTS` | Exts that get `imgLink` class |
 | `chunkSizeMB` | `0.98` | Decimal MB (`1_000_000` bytes) |
-| `parallelLimit` | `5` | Max concurrent chunk POSTs |
-| `maxFullSizeMB` | `20` | Full-POST fallback max (decimal MB) |
+| `maxFileMB` | `200` | Reject larger files (`maxFullSizeMB` accepted as alias) |
 | `maxRetries` | `3` | Per-chunk retries |
 
-## `beforeUpload` contract
+Pass a root `Element` as the first argument to resolve `data-bfu-*` **within that root** (no page-wide scavenger).
 
-| Outcome | Behavior |
-|---------|----------|
-| resolve / return | Validate and `upload()` current `this.file` |
-| throw / reject | `error` event (UI may render) |
-| `BompusFileUpload.SKIP_UPLOAD` | Stop; no upload |
+## Pick ≠ upload
+
+File input changes do **not** upload. Use:
+
+```js
+BompusFileUpload.bindInput(fileInput, async (file) => {
+  // optional preprocess / crop / editor …
+  await field.upload(file, { data: { client_processed: "1" }, timeoutMs });
+});
+// cancel = do not call upload
+```
 
 ## Events / methods
 
-- Events: `busy`, `idle`, `progress`, `complete`, `error`
-- `await up.upload(file?, { timeoutMs })` — success `{ fileName, duration, url }`
-  - **`ABORTED`**: reject only (no `error` event) — user/stale abort
-  - **`TIMEOUT`**: reject **and** one `error` event — `opts.timeoutMs` exceeded (form stays busy until settle)
+- Events: `busy`, `idle`, `progress`, `complete`, `error`, `change` (hidden value set or cleared)
+- `await field.upload(file?, { data?, timeoutMs? })` — success `{ fileName, duration, url }`
+  - Abort / stale: reject `BompusFileUpload.ABORTED` (no `error` event)
+  - Timeout: reject `TIMEOUT` **and** one `error` event
   - Other failures: reject **and** one `error` event
-  - Overlap while busy: reject with message + `error` event
-- `up.abort()`, `up.reset()`, `up.clearPendingSelection()`, `up.setReadonly(bool)`, `up.syncFileInputEnabled()`
-- `up.setUploadFormData(obj | null)` / `up.clearUploadFormData()` — session fields for the current upload (every chunk request; auto-cleared on complete / abort / reset / failed end)
-- `up.unsupported` — string if browser APIs missing (no construct-time event)
-- Registry: `hiddenInput.bfu` / `fileInput.bfu` → uploader instance
-- Sentinels: `SKIP_UPLOAD`, `ABORTED`, `TIMEOUT`, `TRANSPORT_ERROR` (identity `===` only; `.name` for debug)
-- `up.isBusy()` — whether this uploader holds the busy lock
-- Form busy: `trackFormBusy(form, { onChange })` once per form, `formBusyCount(form)`, `holdFormBusy(form)` → `release()`
-- Form busy also held during `beforeUpload` / file-input lock (submit blocked; no transfer progress UI)
-- `BompusFileUpload.isImageExt(ext)`, `DEFAULT_IMAGE_EXTS` (includes avif)
+- `field.abort()`, `field.reset()`, `field.clearPendingSelection()`, `field.setReadonly(bool)`, `field.syncFileInputEnabled()`
+- Registry: `hiddenInput.bfu` / `fileInput.bfu` → instance
+- Form busy: `trackFormBusy(form, { onChange })`, `formBusyCount(form)`, `holdFormBusy(form)` → `release()` (use during dialogs so SAVE stays blocked)
+- Transfer automatically holds form busy while bytes are on the wire
+- `BompusFileUpload.isImageExt(ext)`, `DEFAULT_IMAGE_EXTS`
 
-## Default UI
+## UI helpers
 
 ```js
-var ui = BompusFileUpload.mountDefaultUi(up, {
-  linkNewUploads: false,
-  imageExts: BompusFileUpload.DEFAULT_IMAGE_EXTS.slice(),
-  extraActions: function (ctx) { return []; },
-  extraActionsBeforeRemove: false,
-  showRemove: true
-});
-// also available as up.ui
-ui.setStatus("Preparing…");
-ui.clearStatus();
+field.ui.setStatus("Preparing…");
+field.ui.clearStatus();
+field.ui.renderLabel(true);
 ```
 
-## Demo
+## Server protocol
 
-```bash
-php -S localhost:8080
-# http://localhost:8080/example.html
-```
+Each logical `upload()` sends:
 
-## Releasing
+1. `chunk_action=initFile`
+2. one or more `chunk_action=sendChunk` (file blob)
+3. `chunk_action=combineChunks`
 
-1. Bump version + CHANGELOG + CDN URLs, commit, push `master`.
-2. Tag and push `X.Y.Z` (jsDelivr).
-3. `gh release create X.Y.Z` with that version’s CHANGELOG section as notes (required — keep the Releases page complete). No Release assets; CDN minifies from the tag.
-
-See [AGENTS.md](AGENTS.md) for the full checklist.
-
-## WARNING
-
-**Do not use example `upload.php` in production** without auth, type checks, size limits, and path safety.
+Fields: `file_name`, `file_size`, `file_chunk`, `file_chunk_max`, `chunk_method`, `retry_num`, plus mount `data` and per-upload `opts.data`. JSON success with `file_name` (WP `wp_send_json_success` unwrap OK).

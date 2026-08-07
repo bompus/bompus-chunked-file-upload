@@ -1,87 +1,51 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Bompus Chunked File Upload 3.0 — example</title>
+  <meta charset="utf-8" />
+  <title>Bompus Chunked File Upload v4.0.0</title>
   <link rel="stylesheet" href="./bompus-chunked-file-upload.css" />
-  <script src="./bompus-chunked-file-upload.js"></script>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 560px; margin: 24px auto; padding: 0 16px; line-height: 1.4; }
-    .card { border: 1px solid #ddd; padding: 16px; margin-bottom: 16px; }
-    input[type="file"] { display: block; width: 100%; margin-top: 8px; }
-    #submitdiv { margin-top: 16px; padding: 12px; background: #f3f3f3; text-align: center; }
-    .hint { color: #555; font-size: 0.9rem; }
-    code { font-size: 0.85em; }
+    body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 2rem auto; padding: 0 1rem; }
+    label { display: block; margin: 1rem 0 0.25rem; font-weight: 600; }
   </style>
 </head>
 <body>
-  <h1>Bompus Chunked File Upload v3.0.3</h1>
-  <p class="hint">Serve with <code>php -S localhost:8080</code> then open this page over HTTP.</p>
-
-  <form id="demo-form" action="#" method="get">
-    <div class="card">
-      <strong>Upload a file</strong>
-      <div data-bfu-text="upload-1"></div>
-      <input data-bfu-file="upload-1" type="file" />
-      <input data-bfu-hidden="upload-1" type="hidden" name="upload-1" value="" />
-    </div>
-    <div id="submitdiv">
-      <div id="publish-status"></div>
-      <button type="submit" id="publish">Submit</button>
-    </div>
+  <h1>Bompus Chunked File Upload v4.0.0</h1>
+  <p>Pick ≠ upload. This demo mounts a field and binds the file input to <code>upload()</code>.</p>
+  <form id="demo">
+    <div data-bfu-text="demo-1"></div>
+    <input data-bfu-file="demo-1" type="file" />
+    <input data-bfu-hidden="demo-1" type="hidden" name="demo-1" value="" />
+    <p><button type="submit">Submit (blocked while busy)</button></p>
   </form>
-
+  <p id="busy-note" hidden>Form busy…</p>
+  <script src="./bompus-chunked-file-upload.js"></script>
   <script>
-    (function () {
-      var form = document.getElementById("demo-form");
-      form.addEventListener("submit", function (e) {
-        e.preventDefault();
-        if (BompusFileUpload.formBusyCount(form) > 0) {
-          return;
-        }
-        var hidden = document.querySelector('[data-bfu-hidden="upload-1"]');
-        window.alert("Hidden field value: " + (hidden ? hidden.value : ""));
-      });
-
-      var up = BompusFileUpload({
-        postUrl: "./upload.php",
-        fieldName: "upload-1",
-        formData: { meta: "upload-1" },
-        downloadUrl: function (encoded) { return "./files/" + encoded; },
-        beforeUpload: async function () {
-          var name = this.file && this.file.name ? this.file.name : "";
-          if (/\.exe$/i.test(name)) {
-            throw "Executable files are not allowed.";
-          }
-        }
-      });
-
-      BompusFileUpload.mountDefaultUi(up, { linkNewUploads: true });
-
-      BompusFileUpload.trackFormBusy(form, {
-        onChange: function (count) {
-          var status = document.getElementById("publish-status");
-          if (!status) {
-            return;
-          }
-          if (count > 0) {
-            if (!status.querySelector(".inProgressPub")) {
-              status.innerHTML = "<div class='inProgressPub'>Upload in progress — please wait.</div>";
-            }
-          } else {
-            var el = status.querySelector(".inProgressPub");
-            if (el) {
-              el.remove();
-            }
-          }
-        }
-      });
-
-      up.on("complete", function (p) {
-        console.log("done", p.fileName, p.duration + "s", "bfu", document.querySelector("[data-bfu-hidden]").bfu === up);
-      });
-    })();
+    var form = document.getElementById("demo");
+    var fileInput = document.querySelector('[data-bfu-file="demo-1"]');
+    var field = BompusFileUpload.mount({
+      url: "./upload.php",
+      data: { meta: "demo-1" },
+      elements: {
+        infoText: document.querySelector('[data-bfu-text="demo-1"]'),
+        fileInput: fileInput,
+        hiddenInput: document.querySelector('[data-bfu-hidden="demo-1"]'),
+        form: form
+      },
+      downloadUrl: function (enc) { return "./files/" + enc; },
+      linkNewUploads: true,
+      chunkSizeMB: 0.98
+    });
+    BompusFileUpload.bindInput(fileInput, function (file) {
+      return field.upload(file);
+    });
+    BompusFileUpload.trackFormBusy(form, {
+      onChange: function (count) {
+        document.getElementById("busy-note").hidden = count === 0;
+      }
+    });
+    field.on("complete", function (d) { console.log("complete", d); });
+    field.on("error", function (d) { console.warn("error", d); });
   </script>
 </body>
 </html>
