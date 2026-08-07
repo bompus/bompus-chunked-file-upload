@@ -1,5 +1,9 @@
 # Changelog
 
+## [4.1.2] — 2026-08-07
+
+- **`afterRenderLabel(wrap, ctx)`** — always invoked after a non-empty label is built (including readonly / `setReadonly` re-paint); `decorateLabel` remains editable-only
+
 ## [4.1.1] — 2026-08-07
 
 - Removed obsolete `index.php` demo (stale v3 API). Use `example.html`.
