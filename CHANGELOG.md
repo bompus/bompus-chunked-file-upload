@@ -1,5 +1,19 @@
 # Changelog
 
+## [4.1.0] — 2026-08-07
+
+### Breaking
+
+- Removed mount aliases `postUrl`, `formData`, and `maxFullSizeMB` — use `url`, `data`, and `maxFileMB` only
+
+### Added
+
+- `field.ui.showError(message)` — paints the same `bfu-error` row as transfer failures (for prep errors without `emit('error')`)
+
+### Changed
+
+- Single-file section markers (`form busy` / `transport` / `default UI` / `public mount`) for readability; still one CDN file, no build step
+
 ## [4.0.1] — 2026-08-07
 
 - Removed unused `_inputLocked`; file input enablement is `readonly || busy` only

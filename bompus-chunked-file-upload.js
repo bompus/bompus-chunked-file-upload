@@ -1,5 +1,5 @@
 /*!
- * Bompus Chunked File Upload v4.0.1
+ * Bompus Chunked File Upload v4.1.0
  * https://github.com/bompus/bompus-chunked-file-upload
  *
  * UI-first mount + sequential chunked upload (initFile / sendChunk / combineChunks).
@@ -13,6 +13,8 @@
 
 (function (global) {
   "use strict";
+
+  // --- constants / utilities ---
 
   var ABORTED = { name: "ABORTED" };
   var TIMEOUT = { name: "TIMEOUT" };
@@ -153,9 +155,7 @@
     return file;
   }
 
-  // ---------------------------------------------------------------------------
-  // Form busy (public)
-  // ---------------------------------------------------------------------------
+  // --- public namespace + form busy + bindInput ---
 
   function BompusFileUpload() {
     throw new Error("Use BompusFileUpload.mount(options) — the constructor no longer auto-uploads.");
@@ -254,9 +254,7 @@
     };
   };
 
-  // ---------------------------------------------------------------------------
-  // Instance
-  // ---------------------------------------------------------------------------
+  // --- instance + transport ---
 
   function createInstance(options) {
     options = options || {};
@@ -266,26 +264,17 @@
     var infoText = els.infoText || null;
     var form = els.form || (hiddenInput ? hiddenInput.closest("form") : null) || (fileInput ? fileInput.closest("form") : null);
 
-    var postUrl = options.url !== undefined ? options.url : options.postUrl;
-    if (postUrl === undefined) {
-      postUrl = "/path/to/upload.php";
-    }
-
-    var maxFileMB =
-      options.maxFileMB !== undefined
-        ? options.maxFileMB
-        : options.maxFullSizeMB !== undefined
-          ? options.maxFullSizeMB
-          : 200;
+    var url = options.url !== undefined ? options.url : "/path/to/upload.php";
+    var maxFileMB = options.maxFileMB !== undefined ? options.maxFileMB : 200;
 
     var self = {
       o: {
-        postUrl: postUrl,
+        url: url,
         fieldName: options.fieldName || (hiddenInput && hiddenInput.getAttribute("name")) || "",
         chunkSizeMB: options.chunkSizeMB !== undefined ? options.chunkSizeMB : 0.98,
         maxFileMB: maxFileMB,
         maxRetries: options.maxRetries !== undefined ? options.maxRetries : 3,
-        formData: options.data !== undefined ? options.data : options.formData,
+        data: options.data,
         downloadUrl:
           options.downloadUrl ||
           function (encoded) {
@@ -629,7 +618,7 @@
   }
 
   function mergeFormData(self, formData) {
-    var extra = self.o.formData;
+    var extra = self.o.data;
     if (typeof extra === "function") {
       extra = extra.call(self);
     }
@@ -689,7 +678,7 @@
       }
 
       var xhr = new XMLHttpRequest();
-      xhr.open("POST", self.o.postUrl);
+      xhr.open("POST", self.o.url);
       xhr.responseType = "text";
 
       xhr.upload.addEventListener(
@@ -938,9 +927,7 @@
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Default UI (always mounted)
-  // ---------------------------------------------------------------------------
+  // --- default UI (always mounted) ---
 
   function defaultLinkClass(filename, imageExts) {
     var ext = (filename.split(".").pop() || "").toLowerCase();
@@ -1107,11 +1094,11 @@
       }
     });
 
-    self.on("error", function (detail) {
+    function showError(message) {
+      statusActive = false;
       var err = document.createElement("span");
       err.className = "bfu-error";
-      err.textContent =
-        "Error: " + String(detail && detail.message ? detail.message : "Unknown error.");
+      err.textContent = "Error: " + String(message || "Unknown error.");
       setInfoNode(err);
       if (self.readonly !== true) {
         var fileInput = self.o.elements.fileInput;
@@ -1120,6 +1107,10 @@
           fileInput.value = null;
         }
       }
+    }
+
+    self.on("error", function (detail) {
+      showError(detail && detail.message ? detail.message : "Unknown error.");
     });
 
     renderLabel(true);
@@ -1128,9 +1119,12 @@
       setStatus: setStatus,
       clearStatus: clearStatus,
       renderLabel: renderLabel,
-      clearInfo: clearInfo
+      clearInfo: clearInfo,
+      showError: showError
     };
   }
+
+  // --- public mount ---
 
   /**
    * Mount a field. Pass elements explicitly (preferred) or a root Element that

@@ -4,7 +4,7 @@ Sequential chunked file uploads. **Vanilla JS — zero dependencies.**
 
 **v4.0:** UI-first `mount`, **no auto-upload** on file pick, `upload(file, { data })`, form busy helpers, `decorateLabel`. Wire protocol remains `initFile` → `sendChunk`(s) → `combineChunks`.
 
-Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.0.1`**.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.1.0`**.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -14,9 +14,9 @@ Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR uplo
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/bompus-chunked-file-upload.min.js  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/no-photo.png
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.js  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/no-photo.png
 
 ## Quick start
 
@@ -28,8 +28,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.0/bompus-chunked-file-upload.min.js"></script>
 <script>
   var form = document.getElementById("post");
   var fileInput = document.querySelector('[data-bfu-file="upload-1"]');
@@ -57,8 +57,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/no-photo.png
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `url` / `postUrl` | `"/path/to/upload.php"` | Upload endpoint |
-| `data` / `formData` | — | Object or `() => object` merged into every request |
+| `url` | `"/path/to/upload.php"` | Upload endpoint |
+| `data` | — | Object or `() => object` merged into every request |
 | `elements` | — | `{ fileInput, hiddenInput, infoText?, form? }` (preferred) |
 | `downloadUrl` | `(enc) => "/files/"+enc` | Build download URL |
 | `decorateLabel` | — | `(labelRoot, ctx) => HTMLElement[]?` — mutate label and/or return action nodes (before Remove) |
@@ -66,7 +66,7 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.0.1/no-photo.png
 | `linkNewUploads` | `false` | Link newly uploaded filenames (existing values always link) |
 | `imageExts` | `DEFAULT_IMAGE_EXTS` | Exts that get `imgLink` class |
 | `chunkSizeMB` | `0.98` | Decimal MB (`1_000_000` bytes) |
-| `maxFileMB` | `200` | Reject larger files (`maxFullSizeMB` accepted as alias) |
+| `maxFileMB` | `200` | Reject larger files |
 | `maxRetries` | `3` | Per-chunk retries |
 
 Pass a root `Element` as the first argument to resolve `data-bfu-*` **within that root** (no page-wide scavenger).
@@ -102,6 +102,7 @@ BompusFileUpload.bindInput(fileInput, async (file) => {
 field.ui.setStatus("Preparing…");
 field.ui.clearStatus();
 field.ui.renderLabel(true);
+field.ui.showError("Unable to process image."); // prep errors without emit('error')
 ```
 
 ## Server protocol
