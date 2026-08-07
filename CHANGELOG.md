@@ -1,5 +1,11 @@
 # Changelog
 
+## [4.1.3] — 2026-08-07
+
+- **`clearPendingSelection({ restoreUi: true })`** — after clearing the pending file, re-renders the label when a committed filename remains (cancel-after-preprocess without clearing the slot)
+- Docs: `reset()` clears the committed file (Remove); cancel preprocess with `clearPendingSelection({ restoreUi: true })`
+
+
 ## [4.1.2] — 2026-08-07
 
 - **`afterRenderLabel(wrap, ctx)`** — always invoked after a non-empty label is built (including readonly / `setReadonly` re-paint); `decorateLabel` remains editable-only

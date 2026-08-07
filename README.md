@@ -4,7 +4,7 @@ Sequential chunked file uploads. **Vanilla JS — zero dependencies.**
 
 **v4.0:** UI-first `mount`, **no auto-upload** on file pick, `upload(file, { data })`, form busy helpers, `decorateLabel`. Wire protocol remains `initFile` → `sendChunk`(s) → `combineChunks`.
 
-Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.1.2`**.
+Formerly [`bompus-jquery-file-upload`](https://github.com/bompus/bompus-jquery-file-upload) (deprecated). Prefer CDN **`@4.1.3`**.
 
 See [CHANGELOG.md](CHANGELOG.md).
 
@@ -14,9 +14,9 @@ Modern browser: Promise / async-await, `Blob`/`File.slice`, `FormData`, XHR uplo
 
 ## CDN
 
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.2/bompus-chunked-file-upload.min.css  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.2/bompus-chunked-file-upload.min.js  
-https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.2/no-photo.png
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.3/bompus-chunked-file-upload.min.css  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.3/bompus-chunked-file-upload.min.js  
+https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.3/no-photo.png
 
 ## Quick start
 
@@ -28,8 +28,8 @@ https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.2/no-photo.png
   <button type="submit">Save</button>
 </form>
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.2/bompus-chunked-file-upload.min.css" />
-<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.2/bompus-chunked-file-upload.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.3/bompus-chunked-file-upload.min.css" />
+<script src="https://cdn.jsdelivr.net/gh/bompus/bompus-chunked-file-upload@4.1.3/bompus-chunked-file-upload.min.js"></script>
 <script>
   var form = document.getElementById("post");
   var fileInput = document.querySelector('[data-bfu-file="upload-1"]');
@@ -81,7 +81,9 @@ BompusFileUpload.bindInput(fileInput, async (file) => {
   // optional preprocess / crop / editor …
   await field.upload(file, { data: { client_processed: "1" }, timeoutMs });
 });
-// cancel = do not call upload
+// cancel preprocess while keeping an existing file:
+  //   field.clearPendingSelection({ restoreUi: true });
+  // do not field.reset() — that clears the committed filename
 ```
 
 ## Events / methods
@@ -91,7 +93,9 @@ BompusFileUpload.bindInput(fileInput, async (file) => {
   - Abort / stale: reject `BompusFileUpload.ABORTED` (no `error` event)
   - Timeout: reject `TIMEOUT` **and** one `error` event
   - Other failures: reject **and** one `error` event
-- `field.abort()`, `field.reset()`, `field.clearPendingSelection()`, `field.setReadonly(bool)`, `field.syncFileInputEnabled()`
+- `field.abort()`, `field.reset()`, `field.clearPendingSelection({ restoreUi? })`, `field.setReadonly(bool)`, `field.syncFileInputEnabled()`
+  - **`reset()`** — abort + clear pending **and** clear the committed filename (Remove / empty the slot)
+  - **`clearPendingSelection({ restoreUi: true })`** — discard a pending pick only; keep committed filename. Use this to cancel preprocess (editor / PDF picker) when replacing an existing file — do **not** call `reset()` for that case.
 - Registry: `hiddenInput.bfu` / `fileInput.bfu` → instance
 - Form busy: `trackFormBusy(form, { onChange })`, `formBusyCount(form)`, `holdFormBusy(form)` → `release()` (use during dialogs so SAVE stays blocked)
 - Transfer automatically holds form busy while bytes are on the wire
